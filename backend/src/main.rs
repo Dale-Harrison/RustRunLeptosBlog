@@ -1,4 +1,5 @@
 use actix_cors::Cors;
+use actix_files::{Files, NamedFile};
 use actix_session::{storage::CookieSessionStore, Session, SessionMiddleware};
 use actix_web::{cookie::{Key, SameSite}, delete, get, post, web, App, HttpResponse, HttpServer, Responder};
 use chrono::{DateTime, Utc};
@@ -262,7 +263,7 @@ async fn callback(
                     if let Ok(user) = response.json::<User>().await {
                         session.insert("user", &user).ok();
                         HttpResponse::Found()
-                            .append_header(("Location", "http://localhost:3000"))
+                            .append_header(("Location", "/"))
                             .finish()
                     } else {
                         HttpResponse::InternalServerError().body("Failed to parse user info")
@@ -288,7 +289,7 @@ async fn me(session: Session) -> impl Responder {
 async fn logout(session: Session) -> impl Responder {
     session.purge();
     HttpResponse::Found()
-        .append_header(("Location", "http://localhost:3000"))
+        .append_header(("Location", "/"))
         .finish()
 }
 
@@ -413,6 +414,13 @@ async fn main() -> std::io::Result<()> {
             .service(get_admins)
             .service(add_admin)
             .service(delete_admin)
+            .service(
+                Files::new("/", "./static")
+                    .index_file("index.html")
+                    .default_handler(web::get().to(|| async {
+                        NamedFile::open("./static/index.html")
+                    }))
+            )
     })
     .bind(("127.0.0.1", 8080))?
     .run()
