@@ -1,6 +1,6 @@
 use actix_cors::Cors;
 use actix_session::{storage::CookieSessionStore, Session, SessionMiddleware};
-use actix_web::{cookie::Key, get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{cookie::{Key, SameSite}, delete, get, post, web, App, HttpResponse, HttpServer, Responder};
 use chrono::{DateTime, Utc};
 use oauth2::{
     basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
@@ -171,6 +171,46 @@ async fn add_admin(
     }
 }
 
+#[delete("/admin/users/{email}")]
+async fn delete_admin(
+    pool: web::Data<Pool<Sqlite>>,
+    session: Session,
+    email: web::Path<String>,
+) -> impl Responder {
+    if let Ok(Some(user)) = session.get::<User>("user") {
+        if is_admin(pool.get_ref(), &user.email).await {
+            let email_to_delete = email.into_inner();
+
+            // Check if this is the last admin
+            let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM admins")
+                .fetch_one(pool.get_ref())
+                .await
+                .unwrap_or((0,));
+
+            if count.0 <= 1 {
+                return HttpResponse::BadRequest().body("Cannot delete the last admin");
+            }
+
+            let result = sqlx::query("DELETE FROM admins WHERE email = ?")
+                .bind(email_to_delete)
+                .execute(pool.get_ref())
+                .await;
+
+            match result {
+                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+                Err(e) => {
+                    println!("Error deleting admin: {}", e);
+                    HttpResponse::InternalServerError().body("Error deleting admin")
+                }
+            }
+        } else {
+            HttpResponse::Forbidden().body("Access Denied")
+        }
+    } else {
+        HttpResponse::Forbidden().body("Access Denied: Not logged in")
+    }
+}
+
 #[get("/auth/login")]
 async fn login(client: web::Data<BasicClient>, session: Session) -> impl Responder {
     let (auth_url, csrf_token) = client
@@ -257,7 +297,7 @@ async fn admin_dashboard(pool: web::Data<Pool<Sqlite>>, session: Session) -> imp
     if let Ok(Some(user)) = session.get::<User>("user") {
         if is_admin(pool.get_ref(), &user.email).await {
             HttpResponse::Ok().json(serde_json::json!({
-                "secret": "Top secret admin data: 42"
+                "secret": format!("Welcome {}", user.email)
             }))
         } else {
             HttpResponse::Forbidden()
@@ -270,6 +310,7 @@ async fn admin_dashboard(pool: web::Data<Pool<Sqlite>>, session: Session) -> imp
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv::dotenv().ok();
     let google_client_id = ClientId::new(
         env::var("GOOGLE_CLIENT_ID").expect("Missing GOOGLE_CLIENT_ID environment variable"),
     );
@@ -352,10 +393,13 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(cors)
-            .wrap(SessionMiddleware::new(
+            .wrap(SessionMiddleware::builder(
                 CookieSessionStore::default(),
                 secret_key.clone(),
-            ))
+            )
+            .cookie_secure(false)
+            .cookie_same_site(SameSite::Lax)
+            .build())
             .app_data(web::Data::new(client.clone()))
             .app_data(web::Data::new(pool.clone()))
             .service(hello)
@@ -368,6 +412,7 @@ async fn main() -> std::io::Result<()> {
             .service(create_post)
             .service(get_admins)
             .service(add_admin)
+            .service(delete_admin)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

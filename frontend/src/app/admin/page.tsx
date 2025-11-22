@@ -96,6 +96,31 @@ export default function AdminPage() {
         }
     };
 
+    const handleDeleteAdmin = async (email: string) => {
+        if (!confirm(`Are you sure you want to remove ${email}?`)) return;
+        setAdminMessage(`Deleting ${email}...`);
+
+        try {
+            const res = await fetch(`http://localhost:8080/admin/users/${email}`, {
+                method: "DELETE",
+                credentials: "include",
+            });
+
+            if (res.ok) {
+                setAdminMessage("Admin removed successfully!");
+                // Refresh list
+                fetch("http://localhost:8080/admin/users", { credentials: "include" })
+                    .then((res) => res.json())
+                    .then((data) => setAdmins(data));
+            } else {
+                const text = await res.text();
+                setAdminMessage("Error: " + text);
+            }
+        } catch (err) {
+            setAdminMessage("Error deleting admin: " + err);
+        }
+    };
+
     return (
         <div className="min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
             <main className="flex flex-col gap-8 items-center sm:items-start w-full max-w-2xl">
@@ -110,7 +135,6 @@ export default function AdminPage() {
                 ) : data ? (
                     <div className="w-full flex flex-col gap-8">
                         <div className="p-4 bg-green-100 border border-green-400 text-green-700 rounded">
-                            <h2 className="font-bold">Secret Data</h2>
                             <p className="font-mono text-xl">{data}</p>
                         </div>
 
@@ -172,8 +196,16 @@ export default function AdminPage() {
                             <h3 className="font-bold mb-2">Current Admins</h3>
                             <ul className="list-disc list-inside">
                                 {admins.map((admin) => (
-                                    <li key={admin.email} className="text-gray-700 dark:text-gray-300">
-                                        {admin.email} <span className="text-xs text-gray-500">({new Date(admin.created_at).toLocaleDateString()})</span>
+                                    <li key={admin.email} className="text-gray-700 dark:text-gray-300 flex justify-between items-center">
+                                        <span>
+                                            {admin.email} <span className="text-xs text-gray-500">({new Date(admin.created_at).toLocaleDateString()})</span>
+                                        </span>
+                                        <button
+                                            onClick={() => handleDeleteAdmin(admin.email)}
+                                            className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition ml-4"
+                                        >
+                                            Delete
+                                        </button>
                                     </li>
                                 ))}
                             </ul>
