@@ -40,7 +40,7 @@ struct AuthRequest {
 #[get("/api/hello")]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
-        "message": "Hello from Rust!"
+        "message": "In the Dusty Clockless Hours"
     }))
 }
 
