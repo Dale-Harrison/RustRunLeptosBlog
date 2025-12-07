@@ -6,8 +6,8 @@
       </router-link>
     </header>
 
-    <div class="flex-1 grid grid-rows-[5px_1fr_5px] items-start justify-items-center p-8 pb-20 gap-16 sm:p-20">
-      <main class="flex flex-col gap-8 row-start-2 items-center sm:items-start w-full max-w-2xl">
+    <div class="flex-1 grid items-start justify-items-center p-4 pt-4 pb-20 gap-8 sm:p-10 sm:pt-8">
+      <main class="flex flex-col gap-8 items-center sm:items-start w-full max-w-2xl">
         <div v-if="loading" class="text-center w-full">
           <p class="text-xl">Loading post...</p>
         </div>
