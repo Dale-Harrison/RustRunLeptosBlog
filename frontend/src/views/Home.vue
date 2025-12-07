@@ -41,11 +41,25 @@
                 :key="post.id"
                 class="p-6 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700"
               >
-                <h3 class="text-xl font-bold mb-2">{{ post.title }}</h3>
-                <p class="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{{ post.content }}</p>
-                <p class="text-sm text-gray-400 mt-4">
-                  {{ new Date(post.created_at).toLocaleDateString() }}
+                <h3 class="text-xl font-bold mb-2">
+                  <router-link :to="'/posts/' + post.id" class="hover:text-blue-600 transition">
+                    {{ post.title }}
+                  </router-link>
+                </h3>
+                <p class="text-gray-600 dark:text-gray-300 whitespace-pre-wrap mb-4">
+                  {{ post.content.split('\n\n')[0] }}...
                 </p>
+                <div class="flex justify-between items-center mt-4">
+                  <p class="text-sm text-gray-400">
+                    {{ new Date(post.created_at).toLocaleDateString() }}
+                  </p>
+                  <router-link 
+                    :to="'/posts/' + post.id"
+                    class="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                  >
+                    Read more &rarr;
+                  </router-link>
+                </div>
               </div>
             </template>
             <p v-else class="text-gray-500 italic">No posts yet.</p>
