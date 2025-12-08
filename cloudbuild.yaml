@@ -1,0 +1,47 @@
+steps:
+  # 1. Pull the previous builder image to use as cache
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: ['-c', 'docker pull $_IMAGE_NAME:builder || exit 0']
+
+  # 2. Pull the previous latest image to use as cache
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: ['-c', 'docker pull $_IMAGE_NAME:latest || exit 0']
+
+  # 3. Build the builder stage
+  # We target the 'builder' stage and tag it. This stage contains the compiled dependencies.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--target'
+      - 'builder'
+      - '-t'
+      - '$_IMAGE_NAME:builder'
+      - '--cache-from'
+      - '$_IMAGE_NAME:builder'
+      - '.'
+
+  # 4. Build the final runtime image
+  # We use the cached builder image to speed up this step.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_IMAGE_NAME:latest'
+      - '--cache-from'
+      - '$_IMAGE_NAME:builder'
+      - '--cache-from'
+      - '$_IMAGE_NAME:latest'
+      - '.'
+
+  # 5. Push the builder image (so it can be used as cache next time)
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_IMAGE_NAME:builder']
+
+  # 6. Push the final image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_IMAGE_NAME:latest']
+
+images:
+  - '$_IMAGE_NAME:latest'

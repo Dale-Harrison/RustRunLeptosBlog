@@ -344,6 +344,9 @@ pub async fn run_app() -> std::io::Result<()> {
     let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string())
         .expect("Invalid token URL");
 
+    let redirect_url = env::var("REDIRECT_URL")
+        .unwrap_or_else(|_| "http://localhost:8080/auth/callback".to_string());
+
     let client = BasicClient::new(
         google_client_id,
         Some(google_client_secret),
@@ -351,13 +354,26 @@ pub async fn run_app() -> std::io::Result<()> {
         Some(token_url),
     )
     .set_redirect_uri(
-        RedirectUrl::new("http://localhost:8080/auth/callback".to_string())
-            .expect("Invalid redirect URL"),
+        RedirectUrl::new(redirect_url).expect("Invalid redirect URL"),
     );
 
     // Database setup
+    // Database setup
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:blog.db?mode=rwc".to_string());
+    
+    // Parse the URL to get the filename
+    let db_path = database_url.trim_start_matches("sqlite://").trim_start_matches("sqlite:");
+    // Remove query parameters if any
+    let db_path = db_path.split('?').next().unwrap_or(db_path);
+
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete)
+        .synchronous(sqlx::sqlite::SqliteSynchronous::Off);
+
     let pool = SqlitePoolOptions::new()
-        .connect("sqlite:blog.db?mode=rwc")
+        .connect_with(options)
         .await
         .expect("Failed to connect to database");
 
@@ -402,8 +418,14 @@ pub async fn run_app() -> std::io::Result<()> {
             .expect("Failed to insert initial admin");
     }
 
-    // Generate a random secret key for session cookies
-    let secret_key = Key::generate();
+    // Load session key from environment or generate a random one
+    let secret_key = if let Ok(key) = env::var("SESSION_KEY") {
+        Key::from(key.as_bytes())
+    } else {
+        Key::generate()
+    };
+
+    println!("Database connection established.");
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -418,7 +440,7 @@ pub async fn run_app() -> std::io::Result<()> {
                 CookieSessionStore::default(),
                 secret_key.clone(),
             )
-            .cookie_secure(false)
+            .cookie_secure(true) // Cloud Run uses HTTPS
             .cookie_same_site(SameSite::Lax)
             .build())
             .app_data(web::Data::new(client.clone()))
@@ -443,7 +465,7 @@ pub async fn run_app() -> std::io::Result<()> {
                     }))
             )
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }
