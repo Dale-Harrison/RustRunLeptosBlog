@@ -32,7 +32,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --execution-environment gen2 \
     --add-volume=name=db-storage,type=cloud-storage,bucket="$BUCKET_NAME" \
     --add-volume-mount=volume=db-storage,mount-path=/mnt/gcs \
-    --set-env-vars "DATABASE_URL=sqlite:///mnt/gcs/blog_v2.db?mode=rwc" \
+    --set-env-vars "DATABASE_URL=sqlite:///mnt/gcs/blog.db?mode=rwc" \
     --set-secrets "GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest" \
     --set-secrets "GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest" \
     --set-env-vars "RUST_LOG=info" \
@@ -51,12 +51,17 @@ SESSION_KEY=$(cat .session_key)
 
 # 3. Update the service with the REDIRECT_URL and SESSION_KEY
 echo "Updating service with REDIRECT_URL and SESSION_KEY..."
+CUSTOM_DOMAIN="https://inthedustyclocklesshours.balquidderocklabs.com"
 gcloud run services update "$SERVICE_NAME" \
     --platform managed \
     --region "$REGION" \
-    --set-env-vars "REDIRECT_URL=${SERVICE_URL}/auth/callback" \
-    --set-env-vars "SESSION_KEY=${SESSION_KEY}"
+    --set-env-vars "REDIRECT_URL=${CUSTOM_DOMAIN}/auth/callback" \
+    --set-env-vars "SESSION_KEY=${SESSION_KEY}" \
+    --set-env-vars "DATABASE_URL=sqlite:///mnt/gcs/blog.db?mode=rwc"
 
 echo "Deployment complete!"
-echo "Service URL: $SERVICE_URL"
-echo "IMPORTANT: Add ${SERVICE_URL}/auth/callback to your OAuth Client Authorized Redirect URIs in Google Cloud Console."
+echo "Service URL (Default): $SERVICE_URL"
+echo "Service URL (Custom): $CUSTOM_DOMAIN"
+echo "IMPORTANT: Ensure both URLs are added to your OAuth Client Authorized Redirect URIs in Google Cloud Console."
+echo " - ${SERVICE_URL}/auth/callback"
+echo " - ${CUSTOM_DOMAIN}/auth/callback"

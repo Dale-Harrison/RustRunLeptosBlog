@@ -1,7 +1,46 @@
 use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_session::{storage::CookieSessionStore, Session, SessionMiddleware};
-use actix_web::{cookie::{Key, SameSite}, delete, get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{cookie::{Key, SameSite}, delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
+
+
+
+#[put("/admin/posts/{id}")]
+pub async fn update_post(
+    pool: web::Data<Pool<Sqlite>>,
+    session: Session,
+    id: web::Path<i64>,
+    post: web::Json<CreatePostRequest>,
+) -> impl Responder {
+    if let Ok(Some(user)) = session.get::<User>("user") {
+        if is_admin(pool.get_ref(), &user.email).await {
+            let post_id = id.into_inner();
+            let result = sqlx::query(
+                "UPDATE posts SET title = ?, content = ? WHERE id = ?",
+            )
+            .bind(&post.title)
+            .bind(&post.content)
+            .bind(post_id)
+            .execute(pool.get_ref())
+            .await;
+
+            match result {
+                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+                Err(e) => {
+                    println!("Error updating post: {}", e);
+                    HttpResponse::InternalServerError().body("Error updating post")
+                }
+            }
+        } else {
+            HttpResponse::Forbidden().body("Access Denied")
+        }
+    } else {
+        HttpResponse::Forbidden().body("Access Denied: Not logged in")
+    }
+}
+
+
+
 use chrono::{DateTime, Utc};
 use oauth2::{
     basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
@@ -11,6 +50,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::env;
+use std::str::FromStr;
 
 #[derive(Serialize, Deserialize)]
 pub struct User {
@@ -233,6 +273,36 @@ pub async fn delete_admin(
     }
 }
 
+#[delete("/admin/posts/{id}")]
+pub async fn delete_post(
+    pool: web::Data<Pool<Sqlite>>,
+    session: Session,
+    id: web::Path<i64>,
+) -> impl Responder {
+    if let Ok(Some(user)) = session.get::<User>("user") {
+        if is_admin(pool.get_ref(), &user.email).await {
+            let post_id = id.into_inner();
+
+            let result = sqlx::query("DELETE FROM posts WHERE id = ?")
+                .bind(post_id)
+                .execute(pool.get_ref())
+                .await;
+
+            match result {
+                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+                Err(e) => {
+                    println!("Error deleting post: {}", e);
+                    HttpResponse::InternalServerError().body("Error deleting post")
+                }
+            }
+        } else {
+            HttpResponse::Forbidden().body("Access Denied")
+        }
+    } else {
+        HttpResponse::Forbidden().body("Access Denied: Not logged in")
+    }
+}
+
 #[get("/auth/login")]
 pub async fn login(client: web::Data<BasicClient>, session: Session) -> impl Responder {
     let (auth_url, csrf_token) = client
@@ -331,7 +401,7 @@ pub async fn admin_dashboard(pool: web::Data<Pool<Sqlite>>, session: Session) ->
 }
 
 pub async fn run_app() -> std::io::Result<()> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let google_client_id = ClientId::new(
         env::var("GOOGLE_CLIENT_ID").expect("Missing GOOGLE_CLIENT_ID environment variable"),
     );
@@ -360,16 +430,15 @@ pub async fn run_app() -> std::io::Result<()> {
     // Database setup
     // Database setup
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:blog.db?mode=rwc".to_string());
-    
-    // Parse the URL to get the filename
-    let db_path = database_url.trim_start_matches("sqlite://").trim_start_matches("sqlite:");
-    // Remove query parameters if any
-    let db_path = db_path.split('?').next().unwrap_or(db_path);
+    println!("Connecting to database at: {}", database_url);
 
-    let options = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(db_path)
+    let mut options = sqlx::sqlite::SqliteConnectOptions::from_str(&database_url)
+        .expect("Failed to parse DATABASE_URL");
+
+    // Force settings for GCS compatibility
+    options = options
         .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Memory)
         .synchronous(sqlx::sqlite::SqliteSynchronous::Off);
 
     let pool = SqlitePoolOptions::new()
@@ -443,6 +512,16 @@ pub async fn run_app() -> std::io::Result<()> {
             .cookie_secure(true) // Cloud Run uses HTTPS
             .cookie_same_site(SameSite::Lax)
             .build())
+            .wrap(actix_web::middleware::DefaultHeaders::new()
+                .add((
+                    "Content-Security-Policy",
+                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:;",
+                ))
+                .add((
+                    "Strict-Transport-Security",
+                    "max-age=31536000; includeSubDomains",
+                ))
+            )
             .app_data(web::Data::new(client.clone()))
             .app_data(web::Data::new(pool.clone()))
             .service(hello)
@@ -457,6 +536,8 @@ pub async fn run_app() -> std::io::Result<()> {
             .service(get_admins)
             .service(add_admin)
             .service(delete_admin)
+            .service(delete_post)
+            .service(update_post)
             .service(
                 Files::new("/", "./static")
                     .index_file("index.html")

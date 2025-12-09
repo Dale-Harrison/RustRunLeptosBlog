@@ -19,7 +19,7 @@
 
         <!-- Blog Post Form -->
         <div class="p-6 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700">
-          <h2 class="text-2xl font-bold mb-4">Create New Post</h2>
+          <h2 class="text-2xl font-bold mb-4">{{ editingId ? 'Edit Post' : 'Create New Post' }}</h2>
           <form @submit.prevent="handleSubmit" class="flex flex-col gap-4">
             <div>
               <label class="block text-sm font-medium mb-1">Title</label>
@@ -38,14 +38,58 @@
                 required
               />
             </div>
-            <button
-              type="submit"
-              class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-            >
-              Publish Post
-            </button>
+            <div class="flex gap-2">
+              <button
+                type="submit"
+                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+              >
+                {{ editingId ? 'Update Post' : 'Publish Post' }}
+              </button>
+              <button
+                v-if="editingId"
+                type="button"
+                @click="cancelEdit"
+                class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition"
+              >
+                Cancel
+              </button>
+            </div>
             <p v-if="message" class="text-sm font-semibold">{{ message }}</p>
           </form>
+        </div>
+
+        <!-- Manage Posts -->
+        <div class="p-6 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700">
+          <h2 class="text-2xl font-bold mb-4">Manage Existing Posts</h2>
+          <p v-if="postMessage" class="text-sm font-semibold mb-4">{{ postMessage }}</p>
+
+          <ul class="list-disc list-inside space-y-2">
+            <li
+              v-for="post in posts"
+              :key="post.id"
+              class="text-gray-700 dark:text-gray-300 flex justify-between items-center"
+            >
+              <span>
+                {{ post.title }}
+                <span class="text-xs text-gray-500">({{ new Date(post.created_at).toLocaleDateString() }})</span>
+              </span>
+              <div class="flex gap-2 ml-4">
+                <button
+                  @click="handleEditPost(post)"
+                  class="px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700 transition"
+                >
+                  Edit
+                </button>
+                <button
+                  @click="handleDeletePost(post.id)"
+                  class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition"
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          </ul>
+          <p v-if="posts.length === 0" class="text-gray-500">No posts found.</p>
         </div>
 
         <!-- Admin Management -->
@@ -117,6 +161,18 @@ const admins = ref<Admin[]>([])
 const newAdminEmail = ref('')
 const adminMessage = ref('')
 
+const editingId = ref<number | null>(null)
+
+interface BlogPost {
+  id: number
+  title: string
+  content: string
+  created_at: string
+}
+
+const posts = ref<BlogPost[]>([])
+const postMessage = ref('')
+
 onMounted(() => {
   // Fetch dashboard data
   fetch('/admin/dashboard', {
@@ -140,14 +196,29 @@ onMounted(() => {
     .then((res) => res.json())
     .then((data) => (admins.value = data))
     .catch((err) => console.error('Error fetching admins:', err))
+
+  // Fetch posts list
+  fetchAdminPosts()
 })
+
+const fetchAdminPosts = () => {
+    fetch('/api/posts', {
+    credentials: 'include',
+  })
+    .then((res) => res.json())
+    .then((data) => (posts.value = data))
+    .catch((err) => console.error('Error fetching posts:', err))
+}
 
 const handleSubmit = async () => {
   message.value = 'Submitting...'
 
+  const url = editingId.value ? `/admin/posts/${editingId.value}` : '/admin/posts'
+  const method = editingId.value ? 'PUT' : 'POST'
+
   try {
-    const res = await fetch('/admin/posts', {
-      method: 'POST',
+    const res = await fetch(url, {
+      method: method,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -156,9 +227,9 @@ const handleSubmit = async () => {
     })
 
     if (res.ok) {
-      message.value = 'Post created successfully!'
-      title.value = ''
-      content.value = ''
+      message.value = editingId.value ? 'Post updated successfully!' : 'Post created successfully!'
+      cancelEdit()
+      fetchAdminPosts() // Refresh list
     } else {
       const text = await res.text()
       message.value = 'Error: ' + text
@@ -166,6 +237,22 @@ const handleSubmit = async () => {
   } catch (err) {
     message.value = 'Error submitting post: ' + err
   }
+}
+
+const handleEditPost = (post: BlogPost) => {
+  editingId.value = post.id
+  title.value = post.title
+  content.value = post.content
+  message.value = ''
+  // Scroll to form
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const cancelEdit = () => {
+  editingId.value = null
+  title.value = ''
+  content.value = ''
+  message.value = ''
 }
 
 const handleAddAdmin = async () => {
@@ -194,6 +281,31 @@ const handleAddAdmin = async () => {
     }
   } catch (err) {
     adminMessage.value = 'Error adding admin: ' + err
+  }
+}
+
+const handleDeletePost = async (id: number) => {
+  if (!confirm(`Are you sure you want to delete post #${id}?`)) return
+  postMessage.value = `Deleting post #${id}...`
+
+  try {
+    const res = await fetch(`/admin/posts/${id}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    })
+
+    if (res.ok) {
+      postMessage.value = 'Post deleted successfully!'
+      fetchAdminPosts()
+      if (editingId.value === id) {
+        cancelEdit()
+      }
+    } else {
+      const text = await res.text()
+      postMessage.value = 'Error: ' + text
+    }
+  } catch (err) {
+    postMessage.value = 'Error deleting post: ' + err
   }
 }
 

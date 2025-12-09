@@ -12,23 +12,13 @@ COPY frontend/ ./
 RUN mkdir -p ../backend/static
 RUN npm run build
 
-# Stage 2: Chef - Common base for Rust builds
-FROM lukemathwalker/cargo-chef:latest-rust-1.83 AS chef
+# Stage 2: Builder - Build directly
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS builder
 WORKDIR /app/backend
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
-
-# Stage 3: Planner - Generate recipe
-FROM chef AS planner
 COPY backend/ .
-RUN cargo chef prepare --recipe-path recipe.json
-
-# Stage 4: Builder - Build dependencies and app
-FROM chef AS builder
-COPY --from=planner /app/backend/recipe.json recipe.json
-# Build dependencies - this is the caching layer!
-RUN cargo chef cook --release --recipe-path recipe.json
-# Build application
-COPY backend/ .
+RUN ls -la
+# Force usage of lockfile if present
 RUN cargo build --release
 
 # Stage 3: Runtime
