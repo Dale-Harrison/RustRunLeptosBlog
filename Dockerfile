@@ -1,16 +1,19 @@
-# Stage 1: Build Frontend
-FROM node:20-alpine AS frontend-builder
+# Stage 1: Build Frontend (Leptos)
+FROM rust:latest AS frontend-builder
 WORKDIR /app/frontend
+# Install wasm-pack via binary installer for speed
+RUN apt-get update && apt-get install -y curl
+RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-# Copy package files
-COPY frontend/package*.json ./
-RUN npm ci
+# Copy Leptos source
+COPY leptos_frontend/ .
+# Build Wasm
+RUN wasm-pack build --target web --release
 
-# Copy source and build
-COPY frontend/ ./
-# Create the output directory structure expected by vite.config.ts
-RUN mkdir -p ../backend/static
-RUN npm run build
+# Create the output directory structure
+RUN mkdir -p /app/backend/static/pkg
+RUN cp -r pkg/* /app/backend/static/pkg/
+RUN cp index.html /app/backend/static/
 
 # Stage 2: Builder - Build directly
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS builder

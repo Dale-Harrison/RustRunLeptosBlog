@@ -515,7 +515,7 @@ pub async fn run_app() -> std::io::Result<()> {
             .wrap(actix_web::middleware::DefaultHeaders::new()
                 .add((
                     "Content-Security-Policy",
-                    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:;",
+                    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';",
                 ))
                 .add((
                     "Strict-Transport-Security",
