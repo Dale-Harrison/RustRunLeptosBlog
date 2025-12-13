@@ -64,6 +64,7 @@ pub struct BlogPost {
     pub title: String,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    pub author_name: String,
 }
 
 #[derive(Deserialize)]
@@ -112,7 +113,7 @@ pub async fn is_admin(pool: &Pool<Sqlite>, email: &str) -> bool {
 
 #[get("/api/posts")]
 pub async fn get_posts(pool: web::Data<Pool<Sqlite>>) -> impl Responder {
-    let result = sqlx::query_as::<_, BlogPost>("SELECT * FROM posts ORDER BY created_at DESC")
+    let result = sqlx::query_as::<_, BlogPost>("SELECT id, title, content, created_at, author_name FROM posts ORDER BY created_at DESC")
         .fetch_all(pool.get_ref())
         .await;
 
@@ -131,7 +132,7 @@ pub async fn get_post(
     id: web::Path<i64>,
 ) -> impl Responder {
     let post_id = id.into_inner();
-    let result = sqlx::query_as::<_, BlogPost>("SELECT * FROM posts WHERE id = ?")
+    let result = sqlx::query_as::<_, BlogPost>("SELECT id, title, content, created_at, author_name FROM posts WHERE id = ?")
         .bind(post_id)
         .fetch_optional(pool.get_ref())
         .await;
@@ -155,11 +156,12 @@ pub async fn create_post(
     if let Ok(Some(user)) = session.get::<User>("user") {
         if is_admin(pool.get_ref(), &user.email).await {
             let result = sqlx::query(
-                "INSERT INTO posts (title, content, created_at) VALUES (?, ?, ?)",
+                "INSERT INTO posts (title, content, created_at, author_name) VALUES (?, ?, ?, ?)",
             )
             .bind(&post.title)
             .bind(&post.content)
             .bind(Utc::now())
+            .bind(&user.name)
             .execute(pool.get_ref())
             .await;
 
@@ -452,12 +454,18 @@ pub async fn run_app() -> std::io::Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             content TEXT NOT NULL,
-            created_at DATETIME NOT NULL
+            created_at DATETIME NOT NULL,
+            author_name TEXT NOT NULL DEFAULT 'Anonymous'
         )",
     )
     .execute(&pool)
     .await
     .expect("Failed to create posts table");
+
+    // Naive migration for existing tables
+    let _ = sqlx::query("ALTER TABLE posts ADD COLUMN author_name TEXT NOT NULL DEFAULT 'Anonymous'")
+        .execute(&pool)
+        .await;
 
     // Create admins table
     sqlx::query(

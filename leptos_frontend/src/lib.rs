@@ -3,6 +3,7 @@ use leptos_router::*;
 use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
 use wasm_bindgen::JsValue;
+use chrono::DateTime;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
@@ -15,13 +16,22 @@ pub struct BlogPost {
     pub id: i64,
     pub title: String,
     pub content: String,
-    pub created_at: String, // Kept as string for simplicity
+    pub created_at: String,
+    pub author_name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdminUser {
     pub email: String,
     pub created_at: String,
+}
+
+fn format_date(date_str: &str) -> String {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+        dt.format("%B %d, %Y at %I:%M %p").to_string()
+    } else {
+        date_str.to_string()
+    }
 }
 
 // --- API Helpers ---
@@ -37,8 +47,6 @@ async fn fetch_posts() -> Vec<BlogPost> {
 async fn fetch_post(id: i64) -> Option<BlogPost> {
     Request::get(&format!("/api/posts/{}", id)).send().await.ok()?.json().await.ok()
 }
-
-// --- Components ---
 
 #[component]
 pub fn NavBar(user: Resource<(), Option<User>>) -> impl IntoView {
@@ -75,6 +83,7 @@ pub fn NavBar(user: Resource<(), Option<User>>) -> impl IntoView {
 
 #[component]
 pub fn Home() -> impl IntoView {
+    // ... (Resources)
     let user = create_resource(|| (), |_| async move { fetch_user().await });
     let posts = create_resource(|| (), |_| async move { fetch_posts().await });
     let hello_message = create_resource(|| (), |_| async move {
@@ -117,9 +126,11 @@ pub fn Home() -> impl IntoView {
                                                             {snippet} "..."
                                                         </p>
                                                         <div class="flex justify-between items-center mt-4">
-                                                            <p class="text-sm text-gray-400">
-                                                                {post.created_at}
-                                                            </p>
+                                                            <div class="text-sm text-gray-400">
+                                                                <span>"By " {post.author_name}</span>
+                                                                <span class="mx-2">"•"</span>
+                                                                <span>{format_date(&post.created_at)}</span>
+                                                            </div>
                                                             <A href=format!("/posts/{}", post.id) class="text-blue-600 hover:text-blue-800 font-medium text-sm">
                                                                 "Read more →"
                                                             </A>
@@ -168,8 +179,10 @@ pub fn Post() -> impl IntoView {
                                     Some(post) => view! {
                                         <article class="w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700">
                                             <h1 class="text-4xl font-bold mb-4">{post.title}</h1>
-                                            <div class="text-sm text-gray-400 mb-8 pb-4 border-b border-gray-200 dark:border-gray-700">
-                                                "Published on " {post.created_at}
+                                            <div class="text-sm text-gray-400 mb-8 pb-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
+                                                 <span class="font-semibold">{post.author_name}</span>
+                                                 <span>"•"</span>
+                                                 <span>{format_date(&post.created_at)}</span>
                                             </div>
                                             <div class="prose dark:prose-invert max-w-none whitespace-pre-wrap">
                                                 {post.content}
