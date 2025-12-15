@@ -1,6 +1,6 @@
 [package]
 name = "backend"
-version = "0.1.0"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]
@@ -17,6 +17,7 @@ libsqlite3-sys = { version = "0.27", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 base64ct = "=1.6.0"
+stoolap = "0.1.0"
 
 [dev-dependencies]
 actix-rt = "2"

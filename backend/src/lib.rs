@@ -2,55 +2,15 @@ use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_session::{storage::CookieSessionStore, Session, SessionMiddleware};
 use actix_web::{cookie::{Key, SameSite}, delete, get, post, put, web, App, HttpResponse, HttpServer, Responder};
-
-
-
-#[put("/admin/posts/{id}")]
-pub async fn update_post(
-    pool: web::Data<Pool<Sqlite>>,
-    session: Session,
-    id: web::Path<i64>,
-    post: web::Json<CreatePostRequest>,
-) -> impl Responder {
-    if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            let post_id = id.into_inner();
-            let result = sqlx::query(
-                "UPDATE posts SET title = ?, content = ? WHERE id = ?",
-            )
-            .bind(&post.title)
-            .bind(&post.content)
-            .bind(post_id)
-            .execute(pool.get_ref())
-            .await;
-
-            match result {
-                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
-                Err(e) => {
-                    println!("Error updating post: {}", e);
-                    HttpResponse::InternalServerError().body("Error updating post")
-                }
-            }
-        } else {
-            HttpResponse::Forbidden().body("Access Denied")
-        }
-    } else {
-        HttpResponse::Forbidden().body("Access Denied: Not logged in")
-    }
-}
-
-
-
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use oauth2::{
     basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
     ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::env;
-use std::str::FromStr;
+use stoolap::api::{Database, ResultRow};
 
 #[derive(Serialize, Deserialize)]
 pub struct User {
@@ -58,13 +18,34 @@ pub struct User {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Serialize)]
+pub struct UserResponse {
+    pub email: String,
+    pub name: String,
+    pub is_admin: bool,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct BlogPost {
     pub id: i64,
     pub title: String,
     pub content: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String, // Stored as String in Stoolap
     pub author_name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Comment {
+    pub id: i64,
+    pub post_id: i64,
+    pub author_name: String,
+    pub content: String,
+    pub created_at: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateCommentRequest {
+    pub content: String,
 }
 
 #[derive(Deserialize)]
@@ -86,10 +67,10 @@ pub async fn hello() -> impl Responder {
     }))
 }
 
-#[derive(Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Serialize, Deserialize)]
 pub struct AdminUser {
     pub email: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: String, // Stored as String in Stoolap
 }
 
 #[derive(Deserialize)]
@@ -98,83 +79,137 @@ pub struct AddAdminRequest {
 }
 
 // Helper to check if a user is an admin
-pub async fn is_admin(pool: &Pool<Sqlite>, email: &str) -> bool {
+pub fn is_admin(db: &Database, email: &str) -> bool {
     // Case-insensitive check
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM admins WHERE lower(email) = lower(?)",
-    )
-    .bind(email.trim())
-    .fetch_one(pool)
-    .await
-    .unwrap_or((0,));
+    // Stoolap supports $1 binding
+    let count: i64 = db.query_one(
+        "SELECT COUNT(*) FROM admins WHERE lower(email) = lower($1)", 
+        (email.trim(),)
+    ).unwrap_or(0);
 
-    count.0 > 0
+    count > 0
+}
+
+fn map_post(row: ResultRow) -> Result<BlogPost, stoolap::Error> {
+    Ok(BlogPost {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        content: row.get(2)?,
+        created_at: row.get(3)?,
+        author_name: row.get(4)?,
+    })
+}
+
+fn map_admin(row: ResultRow) -> Result<AdminUser, stoolap::Error> {
+    Ok(AdminUser {
+        email: row.get(0)?,
+        created_at: row.get(1)?,
+    })
+}
+
+fn map_comment(row: ResultRow) -> Result<Comment, stoolap::Error> {
+    Ok(Comment {
+        id: row.get(0)?,
+        post_id: row.get(1)?,
+        author_name: row.get(2)?,
+        content: row.get(3)?,
+        created_at: row.get(4)?,
+    })
 }
 
 #[get("/api/posts")]
-pub async fn get_posts(pool: web::Data<Pool<Sqlite>>) -> impl Responder {
-    let result = sqlx::query_as::<_, BlogPost>("SELECT id, title, content, created_at, author_name FROM posts ORDER BY created_at DESC")
-        .fetch_all(pool.get_ref())
-        .await;
+pub async fn get_posts(db: web::Data<Database>) -> impl Responder {
+    let db = db.get_ref().clone(); // Cheap clone of Arc
+    let result = web::block(move || -> Result<Vec<BlogPost>, String> {
+        let mut posts = Vec::new();
+        let rows = db.query("SELECT id, title, content, created_at, author_name FROM posts ORDER BY id DESC", ())
+            .map_err(|e| e.to_string())?;
+        
+        for row in rows {
+            let row = row.map_err(|e| e.to_string())?;
+            posts.push(map_post(row).map_err(|e| e.to_string())?);
+        }
+        Ok(posts)
+    }).await;
 
     match result {
-        Ok(posts) => HttpResponse::Ok().json(posts),
-        Err(e) => {
+        Ok(Ok(posts)) => HttpResponse::Ok().json(posts),
+        Ok(Err(e)) => {
             println!("Error fetching posts: {}", e);
             HttpResponse::InternalServerError().body("Error fetching posts")
+        }
+        Err(e) => {
+            println!("Blocking error: {}", e);
+            HttpResponse::InternalServerError().body("Internal Server Error")
         }
     }
 }
 
 #[get("/api/posts/{id}")]
 pub async fn get_post(
-    pool: web::Data<Pool<Sqlite>>,
+    db: web::Data<Database>,
     id: web::Path<i64>,
 ) -> impl Responder {
+    let db = db.get_ref().clone();
     let post_id = id.into_inner();
-    let result = sqlx::query_as::<_, BlogPost>("SELECT id, title, content, created_at, author_name FROM posts WHERE id = ?")
-        .bind(post_id)
-        .fetch_optional(pool.get_ref())
-        .await;
+    
+    let result = web::block(move || -> Result<Option<BlogPost>, String> {
+        let mut rows = db.query("SELECT id, title, content, created_at, author_name FROM posts WHERE id = $1", (post_id,))
+            .map_err(|e| e.to_string())?;
+            
+        if let Some(row) = rows.next() {
+            let row = row.map_err(|e| e.to_string())?;
+            Ok(Some(map_post(row).map_err(|e| e.to_string())?))
+        } else {
+            Ok(None)
+        }
+    }).await;
 
     match result {
-        Ok(Some(post)) => HttpResponse::Ok().json(post),
-        Ok(None) => HttpResponse::NotFound().body("Post not found"),
-        Err(e) => {
+        Ok(Ok(Some(post))) => HttpResponse::Ok().json(post),
+        Ok(Ok(None)) => HttpResponse::NotFound().body("Post not found"),
+        Ok(Err(e)) => {
             println!("Error fetching post: {}", e);
             HttpResponse::InternalServerError().body("Error fetching post")
         }
+        Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
     }
 }
 
 #[post("/admin/posts")]
 pub async fn create_post(
-    pool: web::Data<Pool<Sqlite>>,
+    db: web::Data<Database>,
     session: Session,
     post: web::Json<CreatePostRequest>,
 ) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            let result = sqlx::query(
-                "INSERT INTO posts (title, content, created_at, author_name) VALUES (?, ?, ?, ?)",
-            )
-            .bind(&post.title)
-            .bind(&post.content)
-            .bind(Utc::now())
-            .bind(&user.name)
-            .execute(pool.get_ref())
-            .await;
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        let name = user.name.clone();
+        let post_data = post.into_inner();
 
-            match result {
-                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
-                Err(e) => {
+        let result = web::block(move || -> Result<(), String> {
+            if !is_admin(&db, &email) {
+                return Err("Access Denied".to_string());
+            }
+            db.execute(
+                "INSERT INTO posts (title, content, created_at, author_name) VALUES ($1, $2, $3, $4)",
+                (post_data.title, post_data.content, Utc::now().to_rfc3339(), name),
+            ).map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                if e.contains("Access Denied") {
+                    HttpResponse::Forbidden().body("Access Denied")
+                } else {
                     println!("Error creating post: {}", e);
                     HttpResponse::InternalServerError().body("Error creating post")
                 }
             }
-        } else {
-            HttpResponse::Forbidden()
-                .body(format!("Access Denied: Unauthorized email ({})", user.email))
+            Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
         }
     } else {
         HttpResponse::Forbidden().body("Access Denied: Not logged in")
@@ -182,22 +217,37 @@ pub async fn create_post(
 }
 
 #[get("/admin/users")]
-pub async fn get_admins(pool: web::Data<Pool<Sqlite>>, session: Session) -> impl Responder {
+pub async fn get_admins(db: web::Data<Database>, session: Session) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            let result = sqlx::query_as::<_, AdminUser>("SELECT * FROM admins ORDER BY created_at DESC")
-                .fetch_all(pool.get_ref())
-                .await;
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
 
-            match result {
-                Ok(admins) => HttpResponse::Ok().json(admins),
-                Err(e) => {
+        let result = web::block(move || -> Result<Vec<AdminUser>, String> {
+             if !is_admin(&db, &email) {
+                return Err("Access Denied".to_string());
+            }
+            let mut admins = Vec::new();
+            let rows = db.query("SELECT email, created_at FROM admins ORDER BY created_at DESC", ())
+                .map_err(|e| e.to_string())?;
+
+            for row in rows {
+                let row = row.map_err(|e| e.to_string())?;
+                admins.push(map_admin(row).map_err(|e| e.to_string())?);
+            }
+            Ok(admins)
+        }).await;
+
+        match result {
+            Ok(Ok(admins)) => HttpResponse::Ok().json(admins),
+            Ok(Err(e)) => {
+                 if e.contains("Access Denied") {
+                    HttpResponse::Forbidden().body("Access Denied")
+                } else {
                     println!("Error fetching admins: {}", e);
                     HttpResponse::InternalServerError().body("Error fetching admins")
                 }
             }
-        } else {
-            HttpResponse::Forbidden().body("Access Denied")
+            Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
         }
     } else {
         HttpResponse::Forbidden().body("Access Denied: Not logged in")
@@ -206,29 +256,37 @@ pub async fn get_admins(pool: web::Data<Pool<Sqlite>>, session: Session) -> impl
 
 #[post("/admin/users")]
 pub async fn add_admin(
-    pool: web::Data<Pool<Sqlite>>,
+    db: web::Data<Database>,
     session: Session,
     req: web::Json<AddAdminRequest>,
 ) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            let result = sqlx::query(
-                "INSERT INTO admins (email, created_at) VALUES (?, ?)",
-            )
-            .bind(req.email.trim())
-            .bind(Utc::now())
-            .execute(pool.get_ref())
-            .await;
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        let new_admin = req.email.clone();
 
-            match result {
-                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
-                Err(e) => {
+         let result = web::block(move || -> Result<(), String> {
+            if !is_admin(&db, &email) {
+                return Err("Access Denied".to_string());
+            }
+            db.execute(
+                "INSERT INTO admins (email, created_at) VALUES ($1, $2)",
+                (new_admin.trim(), Utc::now().to_rfc3339()) 
+            ).map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
+
+       match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                 if e.contains("Access Denied") {
+                    HttpResponse::Forbidden().body("Access Denied")
+                } else {
                     println!("Error adding admin: {}", e);
-                    HttpResponse::InternalServerError().body("Error adding admin (maybe already exists?)")
+                     HttpResponse::InternalServerError().body("Error adding admin (maybe already exists?)")
                 }
             }
-        } else {
-            HttpResponse::Forbidden().body("Access Denied")
+            Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
         }
     } else {
         HttpResponse::Forbidden().body("Access Denied: Not logged in")
@@ -237,38 +295,45 @@ pub async fn add_admin(
 
 #[delete("/admin/users/{email}")]
 pub async fn delete_admin(
-    pool: web::Data<Pool<Sqlite>>,
+    db: web::Data<Database>,
     session: Session,
     email: web::Path<String>,
 ) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            let email_to_delete = email.into_inner();
+        let db = db.get_ref().clone();
+        let user_email = user.email.clone();
+        let email_to_delete = email.into_inner();
 
-            // Check if this is the last admin
-            let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM admins")
-                .fetch_one(pool.get_ref())
-                .await
-                .unwrap_or((0,));
-
-            if count.0 <= 1 {
-                return HttpResponse::BadRequest().body("Cannot delete the last admin");
+        let result = web::block(move || -> Result<(), String> {
+            if !is_admin(&db, &user_email) {
+                 return Err("Access Denied".to_string());
             }
 
-            let result = sqlx::query("DELETE FROM admins WHERE email = ?")
-                .bind(email_to_delete)
-                .execute(pool.get_ref())
-                .await;
+            // Check if this is the last admin
+             let count: i64 = db.query_one("SELECT COUNT(*) FROM admins", ()).unwrap_or(0);
+            if count <= 1 {
+                 return Err("Cannot delete the last admin".to_string());
+            }
 
-            match result {
-                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
-                Err(e) => {
-                    println!("Error deleting admin: {}", e);
+            db.execute("DELETE FROM admins WHERE email = $1", (email_to_delete,))
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                let msg = e;
+                if msg.contains("Access Denied") {
+                     HttpResponse::Forbidden().body("Access Denied")
+                } else if msg.contains("Cannot delete") {
+                    HttpResponse::BadRequest().body(msg)
+                } else {
+                    println!("Error deleting admin: {}", msg);
                     HttpResponse::InternalServerError().body("Error deleting admin")
                 }
             }
-        } else {
-            HttpResponse::Forbidden().body("Access Denied")
+             Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
         }
     } else {
         HttpResponse::Forbidden().body("Access Denied: Not logged in")
@@ -277,28 +342,76 @@ pub async fn delete_admin(
 
 #[delete("/admin/posts/{id}")]
 pub async fn delete_post(
-    pool: web::Data<Pool<Sqlite>>,
+    db: web::Data<Database>,
     session: Session,
     id: web::Path<i64>,
 ) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            let post_id = id.into_inner();
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        let post_id = id.into_inner();
 
-            let result = sqlx::query("DELETE FROM posts WHERE id = ?")
-                .bind(post_id)
-                .execute(pool.get_ref())
-                .await;
+        let result = web::block(move || -> Result<(), String> {
+            if !is_admin(&db, &email) {
+                return Err("Access Denied".to_string());
+            }
+            db.execute("DELETE FROM posts WHERE id = $1", (post_id,))
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
 
-            match result {
-                Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
-                Err(e) => {
+        match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                 if e.contains("Access Denied") {
+                     HttpResponse::Forbidden().body("Access Denied")
+                } else {
                     println!("Error deleting post: {}", e);
                     HttpResponse::InternalServerError().body("Error deleting post")
                 }
             }
-        } else {
-            HttpResponse::Forbidden().body("Access Denied")
+             Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
+        }
+    } else {
+        HttpResponse::Forbidden().body("Access Denied: Not logged in")
+    }
+}
+
+#[put("/admin/posts/{id}")]
+pub async fn update_post(
+    db: web::Data<Database>,
+    session: Session,
+    id: web::Path<i64>,
+    post: web::Json<CreatePostRequest>,
+) -> impl Responder {
+     if let Ok(Some(user)) = session.get::<User>("user") {
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        let post_id = id.into_inner();
+        let post_data = post.into_inner();
+
+        let result = web::block(move || -> Result<(), String> {
+            if !is_admin(&db, &email) {
+                 return Err("Access Denied".to_string());
+            }
+            db.execute(
+                "UPDATE posts SET title = $1, content = $2 WHERE id = $3",
+                 (post_data.title, post_data.content, post_id)
+            ).map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                if e.contains("Access Denied") {
+                     HttpResponse::Forbidden().body("Access Denied")
+                } else {
+                    println!("Error updating post: {}", e);
+                    HttpResponse::InternalServerError().body("Error updating post")
+                }
+            }
+            Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
         }
     } else {
         HttpResponse::Forbidden().body("Access Denied: Not logged in")
@@ -370,9 +483,19 @@ pub async fn callback(
 }
 
 #[get("/auth/me")]
-pub async fn me(session: Session) -> impl Responder {
+pub async fn me(db: web::Data<Database>, session: Session) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        HttpResponse::Ok().json(user)
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        
+        // Check if admin (blocking op)
+        let is_admin = web::block(move || is_admin(&db, &email)).await.map(|r| r).unwrap_or(false);
+
+        HttpResponse::Ok().json(UserResponse {
+            email: user.email,
+            name: user.name,
+            is_admin,
+        })
     } else {
         HttpResponse::Unauthorized().finish()
     }
@@ -387,15 +510,125 @@ pub async fn logout(session: Session) -> impl Responder {
 }
 
 #[get("/admin/dashboard")]
-pub async fn admin_dashboard(pool: web::Data<Pool<Sqlite>>, session: Session) -> impl Responder {
+pub async fn admin_dashboard(db: web::Data<Database>, session: Session) -> impl Responder {
     if let Ok(Some(user)) = session.get::<User>("user") {
-        if is_admin(pool.get_ref(), &user.email).await {
-            HttpResponse::Ok().json(serde_json::json!({
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        
+        let result = web::block(move || -> Result<bool, String> {
+            Ok(is_admin(&db, &email))
+        }).await;
+
+        if let Ok(Ok(true)) = result {
+             HttpResponse::Ok().json(serde_json::json!({
                 "secret": format!("Welcome {}", user.email)
             }))
         } else {
-            HttpResponse::Forbidden()
+             HttpResponse::Forbidden()
                 .body(format!("Access Denied: Unauthorized email ({})", user.email))
+        }
+    } else {
+        HttpResponse::Forbidden().body("Access Denied: Not logged in")
+    }
+}
+
+#[get("/api/posts/{id}/comments")]
+pub async fn get_comments(
+    db: web::Data<Database>,
+    id: web::Path<i64>,
+) -> impl Responder {
+    let db = db.get_ref().clone();
+    let post_id = id.into_inner();
+
+    let result = web::block(move || -> Result<Vec<Comment>, String> {
+        let mut comments = Vec::new();
+        let rows = db.query(
+            "SELECT id, post_id, author_name, content, created_at FROM comments WHERE post_id = $1 ORDER BY created_at ASC",
+            (post_id,)
+        ).map_err(|e| e.to_string())?;
+
+        for row in rows {
+            let row = row.map_err(|e| e.to_string())?;
+            comments.push(map_comment(row).map_err(|e| e.to_string())?);
+        }
+        Ok(comments)
+    }).await;
+
+    match result {
+        Ok(Ok(comments)) => HttpResponse::Ok().json(comments),
+        Ok(Err(e)) => {
+            println!("Error fetching comments: {}", e);
+            HttpResponse::InternalServerError().body("Error fetching comments")
+        }
+        Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
+    }
+}
+
+#[post("/api/posts/{id}/comments")]
+pub async fn create_comment(
+    db: web::Data<Database>,
+    session: Session,
+    id: web::Path<i64>,
+    req: web::Json<CreateCommentRequest>,
+) -> impl Responder {
+    if let Ok(Some(user)) = session.get::<User>("user") {
+        let db = db.get_ref().clone();
+        let post_id = id.into_inner();
+        let comment_content = req.content.clone();
+        let author_name = user.name.clone();
+
+        let result = web::block(move || -> Result<(), String> {
+            db.execute(
+                "INSERT INTO comments (post_id, author_name, content, created_at) VALUES ($1, $2, $3, $4)",
+                (post_id, author_name, comment_content, Utc::now().to_rfc3339())
+            ).map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                println!("Error creating comment: {}", e);
+                HttpResponse::InternalServerError().body("Error creating comment")
+            }
+            Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
+        }
+    } else {
+        HttpResponse::Forbidden().body("Access Denied: Not logged in")
+    }
+}
+
+#[delete("/admin/comments/{id}")]
+pub async fn delete_comment(
+    db: web::Data<Database>,
+    session: Session,
+    id: web::Path<i64>,
+) -> impl Responder {
+    if let Ok(Some(user)) = session.get::<User>("user") {
+        let db = db.get_ref().clone();
+        let email = user.email.clone();
+        let comment_id = id.into_inner();
+
+        let result = web::block(move || -> Result<(), String> {
+            if !is_admin(&db, &email) {
+                return Err("Access Denied".to_string());
+            }
+            db.execute("DELETE FROM comments WHERE id = $1", (comment_id,))
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }).await;
+
+        match result {
+            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Err(e)) => {
+                 if e.contains("Access Denied") {
+                     HttpResponse::Forbidden().body("Access Denied")
+                } else {
+                    println!("Error deleting comment: {}", e);
+                    HttpResponse::InternalServerError().body("Error deleting comment")
+                }
+            }
+             Err(_) => HttpResponse::InternalServerError().body("Internal Server Error"),
         }
     } else {
         HttpResponse::Forbidden().body("Access Denied: Not logged in")
@@ -429,70 +662,56 @@ pub async fn run_app() -> std::io::Result<()> {
         RedirectUrl::new(redirect_url).expect("Invalid redirect URL"),
     );
 
-    // Database setup
-    // Database setup
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:blog.db?mode=rwc".to_string());
-    println!("Connecting to database at: {}", database_url);
+    // Database setup - Stoolap
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "file://blog.db".to_string());
+    println!("Connecting to Stoolap database at: {}", database_url);
 
-    let mut options = sqlx::sqlite::SqliteConnectOptions::from_str(&database_url)
-        .expect("Failed to parse DATABASE_URL");
-
-    // Force settings for GCS compatibility
-    options = options
-        .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Memory)
-        .synchronous(sqlx::sqlite::SqliteSynchronous::Off);
-
-    let pool = SqlitePoolOptions::new()
-        .connect_with(options)
-        .await
-        .expect("Failed to connect to database");
+    let db = Database::open(&database_url).expect("Failed to open database");
 
     // Create posts table
-    sqlx::query(
+    db.execute(
         "CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
             title TEXT NOT NULL,
             content TEXT NOT NULL,
-            created_at DATETIME NOT NULL,
+            created_at TEXT NOT NULL,
             author_name TEXT NOT NULL DEFAULT 'Anonymous'
         )",
-    )
-    .execute(&pool)
-    .await
-    .expect("Failed to create posts table");
-
-    // Naive migration for existing tables
-    let _ = sqlx::query("ALTER TABLE posts ADD COLUMN author_name TEXT NOT NULL DEFAULT 'Anonymous'")
-        .execute(&pool)
-        .await;
+        ()
+    ).expect("Failed to create posts table");
 
     // Create admins table
-    sqlx::query(
+    db.execute(
         "CREATE TABLE IF NOT EXISTS admins (
-            email TEXT PRIMARY KEY,
-            created_at DATETIME NOT NULL
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            email TEXT NOT NULL,
+            created_at TEXT NOT NULL
         )",
-    )
-    .execute(&pool)
-    .await
-    .expect("Failed to create admins table");
+        ()
+    ).expect("Failed to create admins table");
+
+    // Create comments table
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+            post_id INTEGER NOT NULL,
+            author_name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )",
+        ()
+    ).expect("Failed to create comments table");
 
     // Bootstrap initial admin
     let initial_admin = "harrison.dale@googlemail.com";
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM admins")
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to count admins");
+    let count: i64 = db.query_one("SELECT COUNT(*) FROM admins", ()).unwrap_or(0);
 
-    if count.0 == 0 {
+    if count == 0 {
         println!("Bootstrapping initial admin: {}", initial_admin);
-        sqlx::query("INSERT INTO admins (email, created_at) VALUES (?, ?)")
-            .bind(initial_admin)
-            .bind(Utc::now())
-            .execute(&pool)
-            .await
-            .expect("Failed to insert initial admin");
+        db.execute(
+            "INSERT INTO admins (email, created_at) VALUES ($1, $2)",
+            (initial_admin, Utc::now().to_rfc3339())
+        ).expect("Failed to insert initial admin");
     }
 
     // Load session key from environment or generate a random one
@@ -531,7 +750,7 @@ pub async fn run_app() -> std::io::Result<()> {
                 ))
             )
             .app_data(web::Data::new(client.clone()))
-            .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(db.clone()))
             .service(hello)
             .service(login)
             .service(callback)
@@ -546,6 +765,9 @@ pub async fn run_app() -> std::io::Result<()> {
             .service(delete_admin)
             .service(delete_post)
             .service(update_post)
+            .service(get_comments)
+            .service(create_comment)
+            .service(delete_comment)
             .service(
                 Files::new("/", "./static")
                     .index_file("index.html")

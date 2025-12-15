@@ -32,7 +32,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --execution-environment gen2 \
     --add-volume=name=db-storage,type=cloud-storage,bucket="$BUCKET_NAME" \
     --add-volume-mount=volume=db-storage,mount-path=/mnt/gcs \
-    --set-env-vars "DATABASE_URL=sqlite:///mnt/gcs/blog.db?mode=rwc" \
+    --set-env-vars "DATABASE_URL=file:///mnt/gcs/stoolap_v2.db" \
     --set-secrets "GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest" \
     --set-secrets "GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest" \
     --set-env-vars "RUST_LOG=info" \
@@ -57,7 +57,7 @@ gcloud run services update "$SERVICE_NAME" \
     --region "$REGION" \
     --set-env-vars "REDIRECT_URL=${CUSTOM_DOMAIN}/auth/callback" \
     --set-env-vars "SESSION_KEY=${SESSION_KEY}" \
-    --set-env-vars "DATABASE_URL=sqlite:///mnt/gcs/blog.db?mode=rwc"
+    --set-env-vars "DATABASE_URL=file:///mnt/gcs/stoolap_v2.db"
 
 echo "Deployment complete!"
 echo "Service URL (Default): $SERVICE_URL"

@@ -15,16 +15,26 @@ RUN mkdir -p /app/backend/static/pkg
 RUN cp -r pkg/* /app/backend/static/pkg/
 RUN cp index.html /app/backend/static/
 
-# Stage 2: Builder - Build directly
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS builder
-WORKDIR /app/backend
-RUN apt-get update && apt-get install -y pkg-config libssl-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+# Stage 2: Chef - Prepare
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+WORKDIR /app
+
+FROM chef AS planner
 COPY backend/ .
-RUN ls -la
-# Force usage of lockfile if present
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 3: Builder - Cook and Build
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is cached!
+RUN apt-get update && apt-get install -y pkg-config libssl-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Build application
+COPY backend/ .
 RUN cargo build --release
 
-# Stage 3: Runtime
+# Stage 4: Runtime
 FROM debian:bookworm-slim
 WORKDIR /app
 
@@ -36,7 +46,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary
-COPY --from=builder /app/backend/target/release/backend ./server
+COPY --from=builder /app/target/release/backend ./server
 
 # Copy the static assets
 # Note: The frontend build output went to ../backend/static in the frontend-builder stage

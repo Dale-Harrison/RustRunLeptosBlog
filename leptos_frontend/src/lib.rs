@@ -9,6 +9,8 @@ use chrono::DateTime;
 pub struct User {
     pub email: String,
     pub name: String,
+    #[serde(default)]
+    pub is_admin: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -23,6 +25,15 @@ pub struct BlogPost {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdminUser {
     pub email: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: i64,
+    pub post_id: i64,
+    pub author_name: String,
+    pub content: String,
     pub created_at: String,
 }
 
@@ -46,6 +57,27 @@ async fn fetch_posts() -> Vec<BlogPost> {
 
 async fn fetch_post(id: i64) -> Option<BlogPost> {
     Request::get(&format!("/api/posts/{}", id)).send().await.ok()?.json().await.ok()
+}
+
+async fn fetch_comments(post_id: i64) -> Vec<Comment> {
+    Request::get(&format!("/api/posts/{}/comments", post_id))
+        .send().await.unwrap()
+        .json().await.unwrap_or_default()
+}
+
+async fn create_comment_api(post_id: i64, content: String) -> bool {
+    Request::post(&format!("/api/posts/{}/comments", post_id))
+        .header("Content-Type", "application/json")
+        .body(JsValue::from_str(&serde_json::json!({ "content": content }).to_string()))
+        .unwrap()
+        .send().await
+        .map(|res| res.ok())
+        .unwrap_or(false)
+}
+
+async fn delete_comment_api(id: i64) -> bool {
+    Request::delete(&format!("/admin/comments/{}", id))
+         .send().await.map(|r| r.ok()).unwrap_or(false)
 }
 
 #[component]
@@ -164,6 +196,50 @@ pub fn Post() -> impl IntoView {
         }
     );
 
+    let user = create_resource(|| (), |_| async move { fetch_user().await });
+
+    let comments_trigger = create_trigger();
+    let comments = create_resource(
+        move || (params.get().get("id").cloned().unwrap_or_default(), comments_trigger.track()),
+        |(id, _)| async move {
+             if let Ok(id_num) = id.parse::<i64>() {
+                 fetch_comments(id_num).await
+             } else {
+                 vec![]
+             }
+        }
+    );
+
+    let (new_comment, set_new_comment) = create_signal(String::new());
+    let submit_comment = create_action(move |(id, content): &(i64, String)| {
+        let id = *id;
+        let content = content.clone();
+        async move {
+            if create_comment_api(id, content).await {
+                set_new_comment.set("".to_string());
+                comments_trigger.notify();
+            }
+        }
+    });
+
+    let delete_comment = create_action(move |id: &i64| {
+        let id = *id;
+        async move {
+            if delete_comment_api(id).await {
+                comments_trigger.notify();
+            }
+        }
+    });
+
+    let on_submit_comment = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+         if let Ok(id_num) = params.get().get("id").unwrap_or(&"".to_string()).parse::<i64>() {
+             if !new_comment.get().trim().is_empty() {
+                 submit_comment.dispatch((id_num, new_comment.get()));
+             }
+         }
+    };
+
     view! {
         <div class="min-h-screen flex flex-col font-sans">
              <header class="w-full flex justify-between items-center p-4 gap-4">
@@ -177,17 +253,104 @@ pub fn Post() -> impl IntoView {
                              post.get().map(|p| {
                                 match p {
                                     Some(post) => view! {
-                                        <article class="w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700">
-                                            <h1 class="text-4xl font-bold mb-4">{post.title}</h1>
-                                            <div class="text-sm text-gray-400 mb-8 pb-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
-                                                 <span class="font-semibold">{post.author_name}</span>
-                                                 <span>"•"</span>
-                                                 <span>{format_date(&post.created_at)}</span>
+                                        <div class="w-full">
+                                            <article class="w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700">
+                                                <h1 class="text-4xl font-bold mb-4">{post.title}</h1>
+                                                <div class="text-sm text-gray-400 mb-8 pb-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
+                                                     <span class="font-semibold">{post.author_name}</span>
+                                                     <span>"•"</span>
+                                                     <span>{format_date(&post.created_at)}</span>
+                                                </div>
+                                                <div class="prose dark:prose-invert max-w-none whitespace-pre-wrap">
+                                                    {post.content}
+                                                </div>
+                                            </article>
+
+                                            // Comments Section
+                                            <div class="w-full mt-10 max-w-2xl">
+                                                 <h3 class="text-2xl font-bold mb-6">"Comments"</h3>
+                                                 
+                                                 <Suspense fallback=move || "">
+                                                    {move || {
+                                                         user.get().map(|u| {
+                                                             match u {
+                                                                 Some(_) => view! {
+                                                                     <form on:submit=on_submit_comment class="mb-8 p-6 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                                                         <label class="block text-sm font-medium mb-2">"Leave a comment"</label>
+                                                                         <textarea
+                                                                            class="w-full p-3 border rounded mb-4 dark:bg-gray-700 dark:border-gray-600"
+                                                                            rows="3"
+                                                                            prop:value=new_comment
+                                                                            on:input=move |ev| set_new_comment.set(event_target_value(&ev))
+                                                                            placeholder="Share your thoughts..."
+                                                                            required
+                                                                         />
+                                                                         <button
+                                                                            type="submit"
+                                                                            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
+                                                                            disabled=move || submit_comment.pending().get()
+                                                                         >
+                                                                            {move || if submit_comment.pending().get() { "Posting..." } else { "Post Comment" }}
+                                                                         </button>
+                                                                     </form>
+                                                                 }.into_view(),
+                                                                 None => view! {
+                                                                     <div class="mb-8 p-6 bg-blue-50 dark:bg-gray-900 border border-blue-200 dark:border-gray-700 rounded-lg text-center">
+                                                                         <p class="mb-2">"Please login to leave a comment."</p>
+                                                                         <a href="/auth/login" class="text-blue-600 hover:underline font-semibold">"Login with Google"</a>
+                                                                     </div>
+                                                                 }.into_view()
+                                                             }
+                                                         })
+                                                    }}
+                                                 </Suspense>
+
+                                                 <div class="flex flex-col gap-6">
+                                                     <Suspense fallback=move || "Loading comments...">
+                                                         {move || {
+                                                             comments.get().map(|comments| {
+                                                                 if comments.is_empty() {
+                                                                     view! { <p class="text-gray-500 italic">"No comments yet. Be the first to share your thoughts!"</p> }.into_view()
+                                                                 } else {
+                                                                     comments.into_iter().map(|comment| {
+                                                                         view! {
+                                                                             <div class="flex gap-4 p-4 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                                                                                 <div class="flex-shrink-0 w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center text-gray-500 font-bold text-lg">
+                                                                                      {comment.author_name.chars().next().unwrap_or('?')}
+                                                                                 </div>
+                                                                                 <div class="flex-1">
+                                                                                     <div class="flex justify-between items-start">
+                                                                                         <div class="flex items-center gap-2 mb-1">
+                                                                                             <span class="font-bold">{comment.author_name}</span>
+                                                                                             <span class="text-xs text-gray-400">{format_date(&comment.created_at)}</span>
+                                                                                         </div>
+                                                                                         {move || user.get().flatten().map(|u| {
+                                                                                             if u.is_admin {
+                                                                                                 view! {
+                                                                                                     <button
+                                                                                                         on:click=move |_| delete_comment.dispatch(comment.id)
+                                                                                                         class="text-red-500 hover:text-red-700 text-xs font-bold"
+                                                                                                     >
+                                                                                                         "Delete"
+                                                                                                     </button>
+                                                                                                 }.into_view()
+                                                                                             } else {
+                                                                                                 view! { <span/> }.into_view()
+                                                                                             }
+                                                                                         })}
+                                                                                     </div>
+                                                                                     <p class="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{comment.content}</p>
+                                                                                 </div>
+                                                                             </div>
+                                                                         }
+                                                                     }).collect_view()
+                                                                 }
+                                                             })
+                                                         }}
+                                                     </Suspense>
+                                                 </div>
                                             </div>
-                                            <div class="prose dark:prose-invert max-w-none whitespace-pre-wrap">
-                                                {post.content}
-                                            </div>
-                                        </article>
+                                        </div>
                                     }.into_view(),
                                     None => view! { <p class="text-red-500">"Post not found"</p> }.into_view()
                                 }

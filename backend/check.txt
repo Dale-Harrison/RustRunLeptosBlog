@@ -1,0 +1,197 @@
+    Checking backend v0.1.0 (/Users/daleharrison/antigravity/example/rust-next-hello/backend)
+error[E0282]: type annotations needed
+   --> src/lib.rs:124:13
+    |
+124 |             Ok(Some(map_post(row?)?))
+    |             ^^ cannot infer type of the type parameter `E` declared on the enum `Result`
+    |
+help: consider specifying the generic arguments
+    |
+124 |             Ok::<std::option::Option<BlogPost>, E>(Some(map_post(row?)?))
+    |               ++++++++++++++++++++++++++++++++++++
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:155:44
+    |
+155 |                 return Err(stoolap::Error::msg("Access Denied"));
+    |                                            ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:189:44
+    |
+189 |                 return Err(stoolap::Error::msg("Access Denied"));
+    |                                            ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:228:44
+    |
+228 |                 return Err(stoolap::Error::msg("Access Denied"));
+    |                                            ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:267:45
+    |
+267 |                  return Err(stoolap::Error::msg("Access Denied"));
+    |                                             ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:273:45
+    |
+273 |                  return Err(stoolap::Error::msg("Cannot delete the last admin"));
+    |                                             ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:313:44
+    |
+313 |                 return Err(stoolap::Error::msg("Access Denied"));
+    |                                            ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no variant or associated item named `msg` found for enum `stoolap::Error` in the current scope
+   --> src/lib.rs:351:45
+    |
+351 |                  return Err(stoolap::Error::msg("Access Denied"));
+    |                                             ^^^ variant or associated item not found in `stoolap::Error`
+    |
+note: if you're trying to build a new `stoolap::Error` consider using one of the following associated functions:
+      stoolap::Error::table_columns_not_match
+      stoolap::Error::value_too_long
+      stoolap::Error::not_null_constraint
+      stoolap::Error::primary_key_constraint
+      and 8 others
+   --> /Users/daleharrison/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stoolap-0.1.0/src/core/error.rs:266:5
+    |
+266 |     pub fn table_columns_not_match(expected: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+271 |     pub fn value_too_long(column: impl Into<String>, max: usize, got: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+280 |     pub fn not_null_constraint(column: impl Into<String>) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+287 |     pub fn primary_key_constraint(row_id: i64) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some errors have detailed explanations: E0282, E0599.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `backend` (lib) due to 8 previous errors
