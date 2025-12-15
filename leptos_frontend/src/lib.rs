@@ -52,27 +52,28 @@ async fn fetch_user() -> Option<User> {
 }
 
 async fn fetch_posts() -> Vec<BlogPost> {
-    Request::get("/api/posts").send().await.unwrap().json().await.unwrap_or_default()
+    Request::get(&format!("/api/posts?ts={}", js_sys::Date::now()))
+        .send().await.unwrap().json().await.unwrap_or_default()
 }
 
 async fn fetch_post(id: i64) -> Option<BlogPost> {
-    Request::get(&format!("/api/posts/{}", id)).send().await.ok()?.json().await.ok()
+    Request::get(&format!("/api/posts/{}?ts={}", id, js_sys::Date::now()))
+        .send().await.ok()?.json().await.ok()
 }
 
 async fn fetch_comments(post_id: i64) -> Vec<Comment> {
-    Request::get(&format!("/api/posts/{}/comments", post_id))
+    Request::get(&format!("/api/posts/{}/comments?ts={}", post_id, js_sys::Date::now()))
         .send().await.unwrap()
         .json().await.unwrap_or_default()
 }
 
-async fn create_comment_api(post_id: i64, content: String) -> bool {
+async fn create_comment_api(post_id: i64, content: String) -> Option<Comment> {
     Request::post(&format!("/api/posts/{}/comments", post_id))
         .header("Content-Type", "application/json")
         .body(JsValue::from_str(&serde_json::json!({ "content": content }).to_string()))
         .unwrap()
-        .send().await
-        .map(|res| res.ok())
-        .unwrap_or(false)
+        .send().await.ok()?
+        .json().await.ok()
 }
 
 async fn delete_comment_api(id: i64) -> bool {
@@ -198,12 +199,15 @@ pub fn Post() -> impl IntoView {
 
     let user = create_resource(|| (), |_| async move { fetch_user().await });
 
-    let comments_trigger = create_trigger();
+    let (comments_version, set_comments_version) = create_signal(0);
     let comments = create_resource(
-        move || (params.get().get("id").cloned().unwrap_or_default(), comments_trigger.track()),
+        move || (params.get().get("id").cloned().unwrap_or_default(), comments_version.get()),
         |(id, _)| async move {
+             leptos::logging::log!("Resource: Fetching comments for id: {:?}", id);
              if let Ok(id_num) = id.parse::<i64>() {
-                 fetch_comments(id_num).await
+                 let res = fetch_comments(id_num).await;
+                 leptos::logging::log!("Resource: Got {} comments from valid parse", res.len());
+                 res
              } else {
                  vec![]
              }
@@ -214,10 +218,18 @@ pub fn Post() -> impl IntoView {
     let submit_comment = create_action(move |(id, content): &(i64, String)| {
         let id = *id;
         let content = content.clone();
+        leptos::logging::log!("Action: Submitting comment for post {}", id);
         async move {
-            if create_comment_api(id, content).await {
+            if create_comment_api(id, content).await.is_some() {
+                leptos::logging::log!("API Success: Comment created. Clearing input.");
                 set_new_comment.set("".to_string());
-                comments_trigger.notify();
+                
+                spawn_local(async move {
+                    leptos::logging::log!("Background: Waiting 100ms...");
+                    gloo_timers::future::TimeoutFuture::new(100).await;
+                    leptos::logging::log!("Background: Refreshing comments now.");
+                    set_comments_version.update(|v| *v += 1);
+                });
             }
         }
     });
@@ -226,7 +238,7 @@ pub fn Post() -> impl IntoView {
         let id = *id;
         async move {
             if delete_comment_api(id).await {
-                comments_trigger.notify();
+                set_comments_version.update(|v| *v += 1);
             }
         }
     });
@@ -377,18 +389,20 @@ pub fn Admin() -> impl IntoView {
 
     // Dashboard Data Resource
     let dashboard_data = create_resource(|| (), |_| async move {
-        Request::get("/admin/dashboard").send().await.ok()?.json::<serde_json::Value>().await.ok()
+        Request::get(&format!("/admin/dashboard?ts={}", js_sys::Date::now()))
+            .send().await.ok()?.json::<serde_json::Value>().await.ok()
     });
 
     // Admins List Resource
-    let admins_trigger = create_trigger();
-    let admins = create_resource(move || admins_trigger.track(), |_| async move {
-        Request::get("/admin/users").send().await.unwrap().json::<Vec<AdminUser>>().await.unwrap_or_default()
+    let (admins_version, set_admins_version) = create_signal(0);
+    let admins = create_resource(move || admins_version.get(), |_| async move {
+        Request::get(&format!("/admin/users?ts={}", js_sys::Date::now()))
+            .send().await.unwrap().json::<Vec<AdminUser>>().await.unwrap_or_default()
     });
 
     // Posts List Resource
-    let posts_trigger = create_trigger();
-    let posts = create_resource(move || posts_trigger.track(), |_| async move {
+    let (posts_version, set_posts_version) = create_signal(0);
+    let posts = create_resource(move || posts_version.get(), |_| async move {
         fetch_posts().await
     });
 
@@ -416,7 +430,11 @@ pub fn Admin() -> impl IntoView {
                     set_title.set("".to_string());
                     set_content.set("".to_string());
                     set_editing_id.set(None);
-                    posts_trigger.notify();
+                    
+                    spawn_local(async move {
+                        gloo_timers::future::TimeoutFuture::new(100).await;
+                        set_posts_version.update(|v| *v += 1);
+                    });
                 }
                 Ok(res) => set_message.set(format!("Error: {}", res.status_text())),
                 Err(e) => set_message.set(format!("Error submitting post: {}", e)),
@@ -429,7 +447,11 @@ pub fn Admin() -> impl IntoView {
         async move {
             if Request::delete(&format!("/admin/posts/{}", id)).send().await.is_ok() {
                  set_post_message.set("Post deleted successfully!".to_string());
-                 posts_trigger.notify();
+                 
+                 spawn_local(async move {
+                     gloo_timers::future::TimeoutFuture::new(100).await;
+                     set_posts_version.update(|v| *v += 1);
+                 });
                  if editing_id.get_untracked() == Some(id) {
                      set_editing_id.set(None);
                      set_title.set("".to_string());
@@ -454,7 +476,11 @@ pub fn Admin() -> impl IntoView {
                 Ok(r) if r.ok() => {
                     set_admin_message.set("Admin added successfully!".to_string());
                     set_new_admin_email.set("".to_string());
-                    admins_trigger.notify();
+                    
+                    spawn_local(async move {
+                         gloo_timers::future::TimeoutFuture::new(100).await;
+                         set_admins_version.update(|v| *v += 1);
+                    });
                 }
                 _ => set_admin_message.set("Error adding admin".to_string()),
             }
@@ -466,7 +492,11 @@ pub fn Admin() -> impl IntoView {
         async move {
             if Request::delete(&format!("/admin/users/{}", email)).send().await.is_ok() {
                  set_admin_message.set("Admin removed successfully!".to_string());
-                 admins_trigger.notify();
+                 
+                 spawn_local(async move {
+                      gloo_timers::future::TimeoutFuture::new(100).await;
+                      set_admins_version.update(|v| *v += 1);
+                 });
             } else {
                 set_admin_message.set("Error removing admin".to_string());
             }

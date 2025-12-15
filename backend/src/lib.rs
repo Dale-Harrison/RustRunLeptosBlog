@@ -133,7 +133,9 @@ pub async fn get_posts(db: web::Data<Database>) -> impl Responder {
     }).await;
 
     match result {
-        Ok(Ok(posts)) => HttpResponse::Ok().json(posts),
+        Ok(Ok(posts)) => HttpResponse::Ok()
+            .append_header(("Cache-Control", "no-store"))
+            .json(posts),
         Ok(Err(e)) => {
             println!("Error fetching posts: {}", e);
             HttpResponse::InternalServerError().body("Error fetching posts")
@@ -166,7 +168,9 @@ pub async fn get_post(
     }).await;
 
     match result {
-        Ok(Ok(Some(post))) => HttpResponse::Ok().json(post),
+        Ok(Ok(Some(post))) => HttpResponse::Ok()
+            .append_header(("Cache-Control", "no-store"))
+            .json(post),
         Ok(Ok(None)) => HttpResponse::NotFound().body("Post not found"),
         Ok(Err(e)) => {
             println!("Error fetching post: {}", e);
@@ -238,7 +242,9 @@ pub async fn get_admins(db: web::Data<Database>, session: Session) -> impl Respo
         }).await;
 
         match result {
-            Ok(Ok(admins)) => HttpResponse::Ok().json(admins),
+            Ok(Ok(admins)) => HttpResponse::Ok()
+                .append_header(("Cache-Control", "no-store"))
+                .json(admins),
             Ok(Err(e)) => {
                  if e.contains("Access Denied") {
                     HttpResponse::Forbidden().body("Access Denied")
@@ -491,7 +497,9 @@ pub async fn me(db: web::Data<Database>, session: Session) -> impl Responder {
         // Check if admin (blocking op)
         let is_admin = web::block(move || is_admin(&db, &email)).await.map(|r| r).unwrap_or(false);
 
-        HttpResponse::Ok().json(UserResponse {
+        HttpResponse::Ok()
+            .append_header(("Cache-Control", "no-store"))
+            .json(UserResponse {
             email: user.email,
             name: user.name,
             is_admin,
@@ -520,7 +528,9 @@ pub async fn admin_dashboard(db: web::Data<Database>, session: Session) -> impl 
         }).await;
 
         if let Ok(Ok(true)) = result {
-             HttpResponse::Ok().json(serde_json::json!({
+             HttpResponse::Ok()
+                .append_header(("Cache-Control", "no-store"))
+                .json(serde_json::json!({
                 "secret": format!("Welcome {}", user.email)
             }))
         } else {
@@ -539,6 +549,7 @@ pub async fn get_comments(
 ) -> impl Responder {
     let db = db.get_ref().clone();
     let post_id = id.into_inner();
+    println!("Backend: Fetching comments for post_id: {}", post_id);
 
     let result = web::block(move || -> Result<Vec<Comment>, String> {
         let mut comments = Vec::new();
@@ -551,11 +562,14 @@ pub async fn get_comments(
             let row = row.map_err(|e| e.to_string())?;
             comments.push(map_comment(row).map_err(|e| e.to_string())?);
         }
+        println!("Backend: Found {} comments for post {}", comments.len(), post_id);
         Ok(comments)
     }).await;
 
     match result {
-        Ok(Ok(comments)) => HttpResponse::Ok().json(comments),
+        Ok(Ok(comments)) => HttpResponse::Ok()
+            .append_header(("Cache-Control", "no-store"))
+            .json(comments),
         Ok(Err(e)) => {
             println!("Error fetching comments: {}", e);
             HttpResponse::InternalServerError().body("Error fetching comments")
@@ -577,16 +591,29 @@ pub async fn create_comment(
         let comment_content = req.content.clone();
         let author_name = user.name.clone();
 
-        let result = web::block(move || -> Result<(), String> {
-            db.execute(
-                "INSERT INTO comments (post_id, author_name, content, created_at) VALUES ($1, $2, $3, $4)",
-                (post_id, author_name, comment_content, Utc::now().to_rfc3339())
+        println!("Backend: Received create_comment request for post_id: {}", post_id);
+
+
+        let result = web::block(move || -> Result<Comment, String> {
+            let created_at = Utc::now().to_rfc3339();
+            let id: i64 = db.query_one(
+                "INSERT INTO comments (post_id, author_name, content, created_at) VALUES ($1, $2, $3, $4) RETURNING id",
+                (post_id, author_name.clone(), comment_content.clone(), created_at.clone())
             ).map_err(|e| e.to_string())?;
-            Ok(())
+            
+            println!("Backend: Successfully inserted comment. Returning ID: {}", id);
+
+            Ok(Comment {
+                id,
+                post_id,
+                author_name,
+                content: comment_content,
+                created_at,
+            })
         }).await;
 
         match result {
-            Ok(Ok(_)) => HttpResponse::Ok().json(serde_json::json!({"status": "success"})),
+            Ok(Ok(comment)) => HttpResponse::Ok().json(comment),
             Ok(Err(e)) => {
                 println!("Error creating comment: {}", e);
                 HttpResponse::InternalServerError().body("Error creating comment")
