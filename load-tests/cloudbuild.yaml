@@ -1,0 +1,4 @@
+steps:
+  - name: 'grafana/k6:latest'
+    entrypoint: 'k6'
+    args: ['run', 'script.js']

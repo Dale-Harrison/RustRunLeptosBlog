@@ -17,3 +17,4 @@ gloo-net = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
 js-sys = "0.3.83"
 gloo-timers = { version = "0.3.0", features = ["futures"] }
+pulldown-cmark = "0.9"

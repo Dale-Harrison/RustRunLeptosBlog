@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
 use wasm_bindgen::JsValue;
 use chrono::DateTime;
+use pulldown_cmark::{Parser, html, Options};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
@@ -43,6 +44,17 @@ fn format_date(date_str: &str) -> String {
     } else {
         date_str.to_string()
     }
+}
+
+fn render_markdown(markdown_input: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TABLES);
+    let parser = Parser::new_ext(markdown_input, options);
+
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
 }
 
 // --- API Helpers ---
@@ -155,9 +167,10 @@ pub fn Home() -> impl IntoView {
                                                                 {post.title}
                                                             </A>
                                                         </h3>
-                                                        <p class="text-gray-600 dark:text-gray-300 whitespace-pre-wrap mb-4">
-                                                            {snippet} "..."
-                                                        </p>
+                                                        <div 
+                                                            class="text-gray-600 dark:text-gray-300 mb-4 prose dark:prose-invert max-w-none"
+                                                            inner_html=render_markdown(&snippet)
+                                                        ></div>
                                                         <div class="flex justify-between items-center mt-4">
                                                             <div class="text-sm text-gray-400">
                                                                 <span>"By " {post.author_name}</span>
@@ -273,8 +286,7 @@ pub fn Post() -> impl IntoView {
                                                      <span>"•"</span>
                                                      <span>{format_date(&post.created_at)}</span>
                                                 </div>
-                                                <div class="prose dark:prose-invert max-w-none whitespace-pre-wrap">
-                                                    {post.content}
+                                                <div class="prose dark:prose-invert max-w-none" inner_html=render_markdown(&post.content)>
                                                 </div>
                                             </article>
 
@@ -531,7 +543,7 @@ pub fn Admin() -> impl IntoView {
 
     view! {
         <div class="min-h-screen p-8 pb-20 gap-16 sm:p-20 font-sans">
-             <main class="flex flex-col gap-8 items-center sm:items-start w-full max-w-2xl">
+             <main class="flex flex-col gap-8 items-center sm:items-start w-full max-w-none px-4">
                 <h1 class="text-4xl font-bold text-red-600">"Admin Dashboard"</h1>
 
                 <Suspense fallback=move || "Loading dashboard...">
@@ -558,14 +570,37 @@ pub fn Admin() -> impl IntoView {
                                                         on:input=move |ev| set_title.set(event_target_value(&ev))
                                                     />
                                                 </div>
-                                                <div>
-                                                    <label class="block text-sm font-medium mb-1">"Content"</label>
-                                                    <textarea
-                                                        class="w-full p-2 border rounded h-32 dark:bg-gray-700 dark:border-gray-600"
-                                                        required
-                                                        prop:value=content
-                                                        on:input=move |ev| set_content.set(event_target_value(&ev))
-                                                    />
+                                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                                    <div>
+                                                        <label class="block text-sm font-medium mb-1">"Content (Markdown)"</label>
+                                                        <textarea
+                                                            class="w-full p-2 border rounded h-96 font-mono text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                            required
+                                                            prop:value=content
+                                                            on:input=move |ev| set_content.set(event_target_value(&ev))
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-sm font-medium mb-1">"Preview"</label>
+                                                        <div 
+                                                            class="w-full p-4 border rounded h-96 overflow-y-auto bg-gray-50 dark:bg-gray-900 prose dark:prose-invert max-w-none"
+                                                            inner_html=move || render_markdown(&content.get())
+                                                        >
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="mt-2 p-4 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
+                                                    <p class="text-sm font-bold text-gray-500 mb-2">"Markdown Cheat Sheet"</p>
+                                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono text-gray-600 dark:text-gray-400">
+                                                        <span>"# Heading 1"</span>
+                                                        <span>"## Heading 2"</span>
+                                                        <span>"**Bold**"</span>
+                                                        <span>"*Italic*"</span>
+                                                        <span>"[Link](url)"</span>
+                                                        <span>"- List Item"</span>
+                                                        <span>"> Blockquote"</span>
+                                                        <span>"`Code`"</span>
+                                                    </div>
                                                 </div>
                                                 <div class="flex gap-2">
                                                     <button

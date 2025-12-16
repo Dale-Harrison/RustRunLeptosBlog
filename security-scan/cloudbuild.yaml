@@ -1,0 +1,13 @@
+steps:
+  # Run OWASP ZAP Baseline Scan
+  # Using $$ to escape environment variable references in Cloud Build configuration
+  - name: 'zaproxy/zap-stable'
+    entrypoint: '/bin/bash'
+    args: 
+      - '-c'
+      - |
+        echo "Debug: User=$(whoami) PWD=$(pwd)"
+        export HOME=/tmp
+        cd /tmp
+        echo "Debug: Moved to /tmp. Running ZAP..."
+        zap-baseline.py -t https://inthedustyclocklesshours.balquidderocklabs.com -I || echo "ZAP scan finished with non-zero exit code."
