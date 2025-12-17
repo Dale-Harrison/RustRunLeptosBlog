@@ -68,17 +68,41 @@ if [ -z "$GOOGLE_CLIENT_SECRET" ]; then
 fi
 create_secret "GOOGLE_CLIENT_SECRET" "$GOOGLE_CLIENT_SECRET"
 
-# 4. Grant Access to Default Compute Service Account
-# Cloud Run uses this service account by default
-echo "Granting Secret Accessor role to the default Compute Engine service account..."
-PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
-SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+# 4. Create and Configure Service Account
+echo "Configuring Service Account..."
+SERVICE_ACCOUNT_NAME="rust-app-runtime"
+SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-echo "Service Account: $SERVICE_ACCOUNT"
+# Create Service Account if it doesn't exist
+if ! gcloud iam service-accounts describe "$SERVICE_ACCOUNT_EMAIL" --project "$PROJECT_ID" &>/dev/null; then
+    echo "Creating service account: $SERVICE_ACCOUNT_NAME..."
+    gcloud iam service-accounts create "$SERVICE_ACCOUNT_NAME" \
+        --display-name="Runtime SA for Rust App" \
+        --project "$PROJECT_ID"
+else
+    echo "Service account $SERVICE_ACCOUNT_NAME already exists."
+fi
+
+# Grant Project-Level Permissions
+echo "Granting roles to $SERVICE_ACCOUNT_EMAIL..."
+
+# Secret Accessor (to read GOOGLE_CLIENT_ID/SECRET)
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$SERVICE_ACCOUNT" \
+    --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
     --role="roles/secretmanager.secretAccessor" \
     --condition=None
+
+# Log Writer (to write app logs)
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/logging.logWriter" \
+    --condition=None
+
+# Grant Bucket-Level Permissions (Least Privilege)
+echo "Granting bucket access..."
+gcloud storage buckets add-iam-policy-binding "gs://$BUCKET_NAME" \
+    --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/storage.objectAdmin"
 
 echo "========================================================"
 echo "Setup complete!"

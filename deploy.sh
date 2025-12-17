@@ -8,11 +8,13 @@ BUCKET_NAME="${BUCKET_NAME:-run-bucket-sqlite}"
 REGION="${REGION:-us-central1}"
 SERVICE_NAME="rust-next-hello"
 IMAGE_NAME="us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-rust-blog/$SERVICE_NAME"
+SERVICE_ACCOUNT_EMAIL="rust-app-runtime@$PROJECT_ID.iam.gserviceaccount.com"
 
 
 echo "========================================================"
 echo "Deploying $SERVICE_NAME to Project: $PROJECT_ID"
 echo "Using GCS Bucket: $BUCKET_NAME for database storage"
+echo "Service Account: $SERVICE_ACCOUNT_EMAIL"
 echo "========================================================"
 
 # 1. Build the container image using Cloud Build
@@ -28,6 +30,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --platform managed \
     --region "$REGION" \
     --allow-unauthenticated \
+    --service-account "$SERVICE_ACCOUNT_EMAIL" \
     --max-instances 1 \
     --execution-environment gen2 \
     --add-volume=name=db-storage,type=cloud-storage,bucket="$BUCKET_NAME" \
