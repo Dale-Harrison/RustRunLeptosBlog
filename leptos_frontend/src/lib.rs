@@ -5,6 +5,7 @@ use gloo_net::http::Request;
 use wasm_bindgen::JsValue;
 use chrono::DateTime;
 use pulldown_cmark::{Parser, html, Options};
+use web_sys::{HtmlInputElement, File, FormData, FileList, Blob};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
@@ -541,6 +542,39 @@ pub fn Admin() -> impl IntoView {
         add_admin.dispatch(new_admin_email.get());
     };
 
+    let file_input_ref = create_node_ref::<leptos::html::Input>();
+    let on_upload_image = move |_| {
+        let input = file_input_ref.get().expect("input to exist");
+        if let Some(files) = input.files() {
+            if let Some(file) = files.item(0) {
+                 spawn_local(async move {
+                      let blob: &web_sys::Blob = &file;
+                      let form_data = FormData::new().unwrap();
+                      form_data.append_with_blob("file", blob).unwrap();
+                      
+                      let res = Request::post("/admin/upload")
+                          .body(form_data)
+                          .unwrap()
+                          .send().await;
+
+                      if let Ok(resp) = res {
+                          if resp.ok() {
+                              if let Ok(json) = resp.json::<serde_json::Value>().await {
+                                  let url = json["url"].as_str().unwrap_or("");
+                                  set_content.update(|c| {
+                                      c.push_str(&format!("\n![Image]({})", url));
+                                  });
+                                  set_message.set("Image uploaded successfully!".to_string());
+                              }
+                          } else {
+                              set_message.set("Image upload failed.".to_string());
+                          }
+                      }
+                 });
+            }
+        }
+    };
+
     view! {
         <div class="min-h-screen p-8 pb-20 gap-16 sm:p-20 font-sans">
              <main class="flex flex-col gap-8 items-center sm:items-start w-full max-w-none px-4">
@@ -590,7 +624,22 @@ pub fn Admin() -> impl IntoView {
                                                     </div>
                                                 </div>
                                                 <div class="mt-2 p-4 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                                    <p class="text-sm font-bold text-gray-500 mb-2">"Markdown Cheat Sheet"</p>
+                                                    <div class="flex justify-between items-center mb-2">
+                                                        <p class="text-sm font-bold text-gray-500">"Markdown Cheat Sheet"</p>
+                                                        <div>
+                                                            <input type="file" class="hidden" node_ref=file_input_ref on:change=on_upload_image accept="image/*" />
+                                                            <button 
+                                                                type="button" 
+                                                                on:click=move |_| {
+                                                                    let input = file_input_ref.get().unwrap();
+                                                                    input.click();
+                                                                } 
+                                                                class="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                                                            >
+                                                                "Upload Image"
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                     <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono text-gray-600 dark:text-gray-400">
                                                         <span>"# Heading 1"</span>
                                                         <span>"## Heading 2"</span>

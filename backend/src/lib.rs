@@ -11,6 +11,14 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
 use stoolap::api::{Database, ResultRow};
+use google_cloud_storage::client::{Client as StorageClient, ClientConfig as StorageClientConfig};
+use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
+use google_cloud_storage::http::objects::get::GetObjectRequest;
+use google_cloud_storage::http::objects::download::Range;
+use actix_multipart::Multipart;
+use futures_util::{StreamExt, TryStreamExt};
+use uuid::Uuid;
+
 
 // Tracing / OpenTelemetry Imports removed
 
@@ -664,6 +672,92 @@ pub async fn delete_comment(
     }
 }
 
+#[post("/admin/upload")]
+async fn upload_image(
+    session: Session,
+    mut payload: Multipart,
+    storage_client: web::Data<StorageClient>,
+    db: web::Data<Database>,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(u)) => u,
+        _ => return HttpResponse::Unauthorized().body("Not logged in"),
+    };
+    
+    // Check Admin
+    // Reuse check logic
+    let mut admin_rows = db.query("SELECT email FROM admins WHERE email = ?", (user.email.clone(),)).unwrap();
+    let is_admin = admin_rows.next().is_some();
+    if !is_admin {
+        return HttpResponse::Forbidden().body("Not an admin");
+    }
+
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        let _content_type = field.content_type().clone();
+        let filename_in = field.content_disposition().get_filename().unwrap_or("image.png").to_string();
+        let ext = std::path::Path::new(&filename_in).extension().and_then(|s| s.to_str()).unwrap_or("png");
+        
+        let mut bytes = Vec::new();
+        while let Some(chunk) = field.next().await {
+             match chunk {
+                 Ok(data) => bytes.extend_from_slice(&data),
+                 Err(_) => return HttpResponse::BadRequest().body("Error reading chunk"),
+             }
+        }
+
+        let new_filename = format!("{}.{}", Uuid::new_v4(), ext);
+        let bucket = std::env::var("BUCKET_NAME").unwrap_or_else(|_| "run-bucket-sqlite".to_string());
+        
+        let upload_type = UploadType::Simple(Media::new(format!("images/{}", new_filename)));
+        let result = storage_client.upload_object(
+            &UploadObjectRequest {
+                bucket: bucket.clone(),
+                ..Default::default()
+            },
+            bytes,
+            &upload_type,
+        ).await;
+
+        match result {
+            Ok(_) => return HttpResponse::Ok().json(serde_json::json!({
+                "url": format!("/api/images/{}", new_filename) 
+            })),
+            Err(e) => return HttpResponse::InternalServerError().body(format!("Upload failed: {}", e)),
+        }
+    }
+    
+    HttpResponse::BadRequest().body("No file found")
+}
+
+#[get("/api/images/{filename}")]
+async fn get_image(
+    path: web::Path<String>,
+    storage_client: web::Data<StorageClient>,
+) -> impl Responder {
+    let filename = path.into_inner();
+    let bucket = std::env::var("BUCKET_NAME").unwrap_or_else(|_| "run-bucket-sqlite".to_string());
+    let object_name = format!("images/{}", filename);
+
+    let result = storage_client.download_object(
+        &GetObjectRequest {
+            bucket: bucket,
+            object: object_name,
+            ..Default::default()
+        },
+        &Range::default(),
+    ).await;
+
+    match result {
+        Ok(bytes) => {
+            let mime = mime_guess::from_path(&filename).first_or_octet_stream();
+            HttpResponse::Ok()
+                .content_type(mime.as_ref())
+                .body(bytes)
+        },
+        Err(_) => HttpResponse::NotFound().body("Image not found"),
+    }
+}
+
 pub async fn run_app() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
     let google_client_id = ClientId::new(
@@ -751,17 +845,12 @@ pub async fn run_app() -> std::io::Result<()> {
     };
 
     println!("Database connection established.");
-    
-    // Define CSP Policy
-    // Added https://cdn.tailwindcss.com to script-src
-    let csp = "default-src 'self'; \
-               script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; \
-               style-src 'self' 'unsafe-inline'; \
-               img-src 'self' data: https://lh3.googleusercontent.com; \
-               font-src 'self'; \
-               connect-src 'self' https://accounts.google.com https://www.googleapis.com; \
-               frame-src 'self' https://accounts.google.com; \
-               frame-ancestors 'none';";
+
+    // Initialize GCS Client
+    let config = StorageClientConfig::default().with_auth().await.unwrap();
+    let storage_client = StorageClient::new(config);
+
+    let csp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';";
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -786,18 +875,9 @@ pub async fn run_app() -> std::io::Result<()> {
             .cookie_secure(true) // Cloud Run uses HTTPS
             .cookie_same_site(SameSite::Lax)
             .build())
-            .wrap(actix_web::middleware::DefaultHeaders::new()
-                .add((
-                    "Content-Security-Policy",
-                    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';",
-                ))
-                .add((
-                    "Strict-Transport-Security",
-                    "max-age=31536000; includeSubDomains",
-                ))
-            )
             .app_data(web::Data::new(client.clone()))
             .app_data(web::Data::new(db.clone()))
+            .app_data(web::Data::new(storage_client.clone()))
             .service(hello)
             .service(login)
             .service(callback)
@@ -815,6 +895,8 @@ pub async fn run_app() -> std::io::Result<()> {
             .service(get_comments)
             .service(create_comment)
             .service(delete_comment)
+            .service(upload_image)
+            .service(get_image)
             .service(
                 Files::new("/", "./static")
                     .index_file("index.html")

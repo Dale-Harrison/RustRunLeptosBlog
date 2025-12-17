@@ -18,6 +18,11 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 base64ct = "=1.6.0"
 stoolap = "0.1.0"
+google-cloud-storage = "0.20"
+actix-multipart = "0.6"
+uuid = { version = "1.0", features = ["v4"] }
+futures-util = "0.3"
+mime_guess = "2.0"
 
 [dev-dependencies]
 actix-rt = "2"

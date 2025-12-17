@@ -36,7 +36,8 @@ gcloud run deploy "$SERVICE_NAME" \
     --set-secrets "GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest" \
     --set-secrets "GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest" \
     --set-env-vars "RUST_LOG=info" \
-    --set-env-vars "RUST_BACKTRACE=1"
+    --set-env-vars "RUST_BACKTRACE=1" \
+    --set-env-vars "BUCKET_NAME=${BUCKET_NAME}"
 
 # Get the Service URL
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --platform managed --region "$REGION" --format 'value(status.url)')
@@ -57,7 +58,8 @@ gcloud run services update "$SERVICE_NAME" \
     --region "$REGION" \
     --set-env-vars "REDIRECT_URL=${CUSTOM_DOMAIN}/auth/callback" \
     --set-env-vars "SESSION_KEY=${SESSION_KEY}" \
-    --set-env-vars "DATABASE_URL=file:///mnt/gcs/stoolap_v2.db"
+    --set-env-vars "DATABASE_URL=file:///mnt/gcs/stoolap_v2.db" \
+    --set-env-vars "BUCKET_NAME=${BUCKET_NAME}"
 
 echo "Deployment complete!"
 echo "Service URL (Default): $SERVICE_URL"
