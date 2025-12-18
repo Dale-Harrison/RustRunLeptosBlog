@@ -795,3 +795,26 @@ pub fn main() {
     console_error_panic_hook::set_once();
     mount_to_body(|| view! { <App/> })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    // Configure the test runner to run in the browser
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn test_format_date() {
+        let date_str = "2023-10-27T10:00:00+00:00";
+        // format used: "%B %d, %Y at %I:%M %p"
+        let formatted = format_date(date_str);
+        assert_eq!(formatted, "October 27, 2023 at 10:00 AM");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_format_date_invalid() {
+        let invalid = "not-a-date";
+        assert_eq!(format_date(invalid), "not-a-date");
+    }
+}

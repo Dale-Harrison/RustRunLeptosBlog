@@ -9,6 +9,20 @@ steps:
     entrypoint: 'bash'
     args: ['-c', 'docker pull $_IMAGE_NAME:latest || exit 0']
 
+  # 2.5. Optional: Run Backend Tests
+  - name: 'rust:latest'
+    entrypoint: 'bash'
+    args: ['-c', 'if [ "$_RUN_TESTS" == "true" ]; then cargo test --manifest-path backend/Cargo.toml; else echo "Skipping backend tests (_RUN_TESTS is not true)"; fi']
+    allow_failure: true
+
+  # 2.6. Optional: Run Frontend Logic Tests (Headless)
+  # This runs standard Rust unit tests for the frontend logic.
+  # For full WASM browser tests, a custom image with chromedriver is needed.
+  - name: 'rust:latest'
+    entrypoint: 'bash'
+    args: ['-c', 'if [ "$_RUN_TESTS" == "true" ]; then cargo test --manifest-path leptos_frontend/Cargo.toml; else echo "Skipping frontend tests (_RUN_TESTS is not true)"; fi']
+    allow_failure: true
+
   # 3. Build the builder stage
   # We target the 'builder' stage and tag it. This stage contains the compiled dependencies.
   - name: 'gcr.io/cloud-builders/docker'
@@ -42,6 +56,9 @@ steps:
   # 6. Push the final image
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', '$_IMAGE_NAME:latest']
+
+substitutions:
+  _RUN_TESTS: 'false'
 
 images:
   - '$_IMAGE_NAME:latest'

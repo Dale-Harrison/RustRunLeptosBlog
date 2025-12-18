@@ -11,15 +11,24 @@ IMAGE_NAME="us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-rust-blog/$SERVICE_
 SERVICE_ACCOUNT_EMAIL="rust-app-runtime@$PROJECT_ID.iam.gserviceaccount.com"
 
 
+# Parse arguments
+RUN_TESTS="false"
+for arg in "$@"; do
+    if [ "$arg" == "--run-tests" ]; then
+        RUN_TESTS="true"
+    fi
+done
+
 echo "========================================================"
 echo "Deploying $SERVICE_NAME to Project: $PROJECT_ID"
 echo "Using GCS Bucket: $BUCKET_NAME for database storage"
 echo "Service Account: $SERVICE_ACCOUNT_EMAIL"
+echo "Run Tests: $RUN_TESTS"
 echo "========================================================"
 
 # 1. Build the container image using Cloud Build
 echo "Building container image with caching..."
-gcloud builds submit --config cloudbuild.yaml --substitutions=_IMAGE_NAME="$IMAGE_NAME" .
+gcloud builds submit --config cloudbuild.yaml --substitutions=_IMAGE_NAME="$IMAGE_NAME",_RUN_TESTS="$RUN_TESTS" .
 
 # 2. Deploy to Cloud Run
 # We use Gen 2 execution environment to support GCS volume mounts
